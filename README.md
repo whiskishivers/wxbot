@@ -11,7 +11,7 @@ Wx bot utilizes the discord py framework and weather.gov API to post weather ale
 1. Run wx-bot.py.
 1. Once the bot connects, be sure to secure command permissions in your Integrations page in server settings.
 1. Run `/wx subscribe` in your alerts channel. The bot will confirm your choice.
-1. Set your desired alert area with `/wx set area` or `/wx set zone`. See below for more info.
+1. Set your desired alert area with `/wx set area` or `/wx set zone`. See below.
 1. Wait about five minutes. Any active alerts for your area will be posted.
 
 The bot will check for alerts every 5 minutes. This interval will be shortened to 1 minute when extreme weather alerts are active.
@@ -30,10 +30,10 @@ The bot will check for alerts every 5 minutes. This interval will be shortened t
 `/wx set zone` - Set the zone(s) from which alerts should be posted. For more info, visit weather.gov
 
 ## Area/Zone parameter examples
-You can find specific identifiers on weather.gov. Multiple identifiers can be added, just separate them with a comma. If your syntax is invalid, the bot will notify you.
+You can look up area and zone identifiers on the [NWS alerts page](https://alerts.weather.gov/). The commands can support multiple IDs when separated by commas.
 
-Alerts for the state of California: `/wx set area CA`
+Alerts for the entire state of California: `/wx set area CA`
 
 Alerts for Hawaii coastal and land areas: `/wx set area HI,PH`
 
-Alerts for Washington and Montana `/wx set area WA,MT`
+Alerts for Albany and Bronx counties in New York: `/wx set zone NYC001,NYC005`
