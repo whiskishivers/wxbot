@@ -14,10 +14,12 @@ Wx bot utilizes the discord py framework and weather.gov API to post weather ale
 1. Set your desired alert area with `/wx set area` or `/wx set zone`. See below.
 1. Wait about five minutes. Any active alerts for your area will be posted.
 
-The bot will check for alerts every 5 minutes. This interval will be shortened to 1 minute when extreme weather alerts are active.
+The bot will check for alerts every 5 minutes. This interval will be shortened to 1 minute when immediate extreme alerts are active.
 
 ## Commands
 `/wx pause` - Pause or resume alert checks (default: False)
+
+`/wx purge` - Clear cache and delete all alert messages.
 
 `/wx prune` - Enable or disable deletion of expired alert messages (default: True)
 
