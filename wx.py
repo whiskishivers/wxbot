@@ -1,6 +1,13 @@
 import datetime as dt
+import discord
 import requests
 import re
+
+severity_color = {("Severe", "Immediate"): discord.Color.gold(),
+                  ("Severe", "Future"): discord.Color.gold(),
+                  ("Severe", "Expected"): discord.Color.gold(),
+                  ("Extreme", "Future"): discord.Color.gold(),
+                  ("Extreme", "Immediate"): discord.Color.red()}
 
 
 class Alert:
@@ -11,6 +18,7 @@ class Alert:
         self.expires = dt.datetime.fromisoformat(wxalert["expires"])
         self.headline = wxalert["headline"]
         self.id = wxalert["id"]
+        self.instruction = None
         self.messageType = wxalert["messageType"]
         self.references = wxalert["references"]
         self.response = wxalert["response"]
@@ -18,19 +26,19 @@ class Alert:
         self.severity = wxalert["severity"]
         self.senderName = wxalert["senderName"]
         self.urgency = wxalert["urgency"]
+        self.wmo = None
 
         # Instruction field is missing sometimes
         try:
             self.instruction = wxalert["instruction"]
         except KeyError:
-            self.instruction = None
+            pass
 
         # Get the office identifier if it is included
         try:
-            wmo = wxalert["parameters"]["WMOidentifier"][0].split(" ")[1][1:]
+            self.wmo = wxalert["parameters"]["WMOidentifier"][0].split(" ")[1][1:]
         except KeyError:
-            wmo = None
-        self.__setattr__("wmo", wmo)
+            pass
 
         # Remove un-needed line breaks in the description and instruction fields
         self.description = re.sub(r'(?<!\n)\n(?!\n)', ' ', self.description)
@@ -39,6 +47,26 @@ class Alert:
 
     def __repr__(self):
         return f'<Alert:{self.id}>'
+
+    @property
+    def embed(self):
+        """ Discord embed object """
+        color = severity_color.get((self.severity, self.urgency), None)
+        embed = discord.Embed(color=color,
+                              title=self.event,
+                              url=f"https://alerts.weather.gov/search?id={self.id}",
+                              description=self.description[:4096],
+                              timestamp=self.sent)
+        if self.instruction is not None:
+            embed.add_field(name="Instructions", value=self.instruction[:1024], inline=False)
+        embed.add_field(name="Urgency", value=self.urgency)
+        embed.add_field(name="Severity", value=self.severity)
+        embed.add_field(name="Response", value=self.response)
+
+        if self.wmo:
+            author_url = f"https://www.weather.gov/{self.wmo.lower()}"
+            embed.set_author(name=self.senderName, url=author_url)
+        return embed
 
     @property
     def reference_id(self):

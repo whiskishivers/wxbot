@@ -1,17 +1,11 @@
 #!/usr/bin/python3
 
+from asyncio import sleep as sleep
 import discord
 from discord.ext import commands, tasks
-
 import re
 import requests
 import wx
-from asyncio import sleep as sleep
-
-severity_color = {("Severe", "Immediate"): discord.Color.gold(),
-                  ("Severe", "Future"): discord.Color.gold(),
-                  ("Extreme", "Future"): discord.Color.gold(),
-                  ("Extreme", "Immediate"): discord.Color.red()}
 
 
 class CustomBot(commands.Bot):
@@ -25,7 +19,7 @@ class CustomBot(commands.Bot):
         self.prune = True
 
     async def setup_hook(self) -> None:
-        # start the task to run in the background
+        # start background task
         self.check_alerts.start()
 
     async def on_ready(self):
@@ -34,13 +28,10 @@ class CustomBot(commands.Bot):
 
     @tasks.loop(minutes=1.0)
     async def check_alerts(self):
-        print("Task started.")
         try:
             if self.paused or len(bot.alert_params) == 0 or self.alert_channel is None:
-                print("Skipped task.")
                 return
         except TypeError:
-            print("Skipped task.")
             return
 
         # Get active alerts
@@ -59,10 +50,14 @@ class CustomBot(commands.Bot):
         if self.prune:
             expired_ids = posted_ids - active_ids
             for i in expired_ids:
-                await self.cached_alerts[i].delete()
-                await sleep(0.8)
-                self.cached_alerts.pop(i, None)
-                print(f"Removed: {i}")
+                try:
+                    await self.cached_alerts[i].delete()
+                    await sleep(0.8)
+                    print(f"Removed: {i}")
+                except discord.errors.NotFound as e:
+                    print(f"ERROR: Could not delete alert. Code {e.code} {e.text}")
+                finally:
+                    self.cached_alerts.pop(i, None)
 
         # Post new alerts
         new_ids = active_ids - posted_ids
@@ -71,31 +66,15 @@ class CustomBot(commands.Bot):
                 return
 
             if alert.id in new_ids:
-                color = severity_color.get((alert.severity, alert.urgency), None)
-                embed = discord.Embed(color=color,
-                                      title=alert.event,
-                                      url=f"https://alerts.weather.gov/search?id={alert.id}",
-                                      description=alert.description[:4096],
-                                      timestamp=alert.sent)
-                if alert.instruction is not None:
-                    embed.add_field(name="Instructions", value=alert.instruction[:1024], inline=False)
-                embed.add_field(name="Urgency", value=alert.urgency)
-                embed.add_field(name="Severity", value=alert.severity)
-                embed.add_field(name="Response", value=alert.response)
-
-                if alert.wmo:
-                    author_url = f"https://www.weather.gov/{alert.wmo.lower()}"
-                    embed.set_author(name=alert.senderName, url=author_url)
-
                 try:
                     self.cached_alerts[alert.id] = await self.alert_channel.send(content=f"### {alert.headline}",
-                                                                                 embed=embed)
+                                                                                 embed=alert.embed)
                     print(f"Posted: {alert.headline}")
                 except discord.errors.Forbidden:
-                    print(f"ERROR: No permission to post alert {alert.id}")
+                    print(f"ERROR: Permission error while posting alert {alert.id}")
                     break
                 except discord.errors.NotFound:
-                    print(f"ERROR: Channel not found. Could not post {alert.id}")
+                    print(f"ERROR: Not Found error while posting alert {alert.id}")
                     break
 
                 new_ids.remove(alert.id)
@@ -121,18 +100,17 @@ async def wxset(ctx):
 @commands.guild_only()
 @wxset.command(name="area")
 async def set_area(ctx: commands.Context, area_id: str):
-    """ Set the area from which alerts will be posted """
+    """ Set the area(s) from which alerts will be posted """
     valid_id = re.compile(r"^[0-9a-zA-Z,]+$")
 
     if not valid_id.fullmatch(area_id.upper()):
-        print(area_id)
         await ctx.send("Invalid area ID. Letters, numbers, and commas only.", ephemeral=True)
         return
 
     try:
         resp = w_client.alerts.active_properties(area=area_id.upper())
     except requests.exceptions.HTTPError as e:
-        await ctx.send(f"weather.gov api returned {e.response.status_code} {e.response.reason}. Check your syntax?",
+        await ctx.send(f"weather.gov api returned {e.response.status_code} {e.response.reason}. Cannot set area",
                        ephemeral=True)
         return
     bot.alert_params = {"area": area_id}
@@ -142,18 +120,18 @@ async def set_area(ctx: commands.Context, area_id: str):
 @commands.guild_only()
 @wxset.command(name="zone")
 async def set_zone(ctx: commands.Context, zone_id: str):
-    """ Set the zone from which alerts will be posted """
+    """ Set the zone(s) from which alerts will be posted """
     valid_id = re.compile(r"^[0-9a-zA-Z,]+$")
 
     if not valid_id.fullmatch(zone_id.upper()):
         print(zone_id)
-        await ctx.send("Invalid area ID. Letters, numbers, and commas only.", ephemeral=True)
+        await ctx.send("Invalid zone ID. Letters, numbers, and commas only.", ephemeral=True)
         return
 
     try:
         resp = w_client.alerts.active_properties(zone=zone_id.upper())
     except requests.exceptions.HTTPError as e:
-        await ctx.send(f"weather.gov api returned {e.response.status_code} {e.response.reason}. Check your syntax?",
+        await ctx.send(f"weather.gov api returned {e.response.status_code} {e.response.reason}. Cannot set zone.",
                        ephemeral=True)
         return
     bot.alert_params = {"zone": zone_id}
@@ -166,7 +144,12 @@ async def set_zone(ctx: commands.Context, zone_id: str):
 async def set_pause(ctx: commands.Context, pause: bool):
     """ Pause or resume alert checks """
     bot.paused = pause
-    await ctx.send(f"✅ Bot paused: {bot.paused}", ephemeral=True)
+    if bot.paused:
+        await bot.change_presence(status=discord.Status.idle)
+        await ctx.send("✅ Alert checks paused.", ephemeral=True)
+    else:
+        await bot.change_presence(status=discord.Status.online)
+        await ctx.send("✅ Alert checks resumed.", ephemeral=True)
 
 
 @commands.guild_only()
@@ -175,6 +158,27 @@ async def set_prune(ctx: commands.Context, prune: bool):
     """ Enable or disable deletion of expired alerts """
     bot.prune = prune
     await ctx.send(f"✅ Pruning: {bot.prune}", ephemeral=True)
+
+
+@commands.guild_only()
+@wxgrp.command(name="purge")
+async def purge(ctx: commands.Context):
+    """ Delete all posted messages. """
+    if bot.alert_channel is None:
+        return
+
+    all_ids = [i for i in bot.cached_alerts.keys()]
+    async with ctx.typing(ephemeral=True):
+        for k in all_ids:
+            try:
+                await bot.cached_alerts[k].delete()
+                await sleep(0.8)
+                print(f"Removed: {k}")
+            except discord.errors.NotFound as e:
+                print(f"ERROR: Could not delete alert. Code {e.code} {e.text}")
+            finally:
+                bot.cached_alerts.pop(k, None)
+        await ctx.send(f"Purged {len(all_ids)} alerts", ephemeral=True)
 
 
 @commands.guild_only()
@@ -200,11 +204,10 @@ async def wx_status(ctx: commands.Context):
     content = "## Bot status:\n"
 
     if bot.alert_params is None:
-        content += "⚠️ **Alert area or zone has not been set**. Use `/wx set area (area_id)` or `/wx set zone (zone_id)`.\n"
+        content += "⚠️ **Alert parameters are not set.**. Use `/wx set area (area_id)` or `/wx set zone (zone_id)`.\n"
 
     if bot.alert_channel is None:
-        content += "⚠️ **Alert channel has not set**. Use `/wx subscribe` in the alert channel" \
-                   " to set it.\n"
+        content += "⚠️ **Alert channel is not set**. Use `/wx subscribe` in the alert channel to set it.\n"
     else:
         content += f"Alert channel: {bot.alert_channel.mention}\n"
 
