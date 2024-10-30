@@ -40,4 +40,4 @@ Alerts for the entire state of California: `/wx set area CA`
 
 Alerts for Hawaii coastal and land areas: `/wx set area HI,PH`
 
-Alerts for the Gulf of Mexico marine zones near Pensacola, FL and Panama City, FL: `/wx set zone GMZ750,GMZ634`
+Alerts for the Gulf of Mexico marine zones near Pensacola, FL and Panama City, FL: `/wx set zone GMZ650,GMZ655,GMZ750,GMZ752,GMZ755`
