@@ -146,7 +146,7 @@ async def set_zone(ctx: commands.Context, zone_id: str):
 @commands.guild_only()
 @wxgrp.command(name="pause")
 async def toggle_pause(ctx: commands.Context):
-    """ Display parameters and API stats """
+    """ Pause or resume alert checks """
     if bot.pause_alerts:
         # Toggle resume
         bot.pause_alerts = False
@@ -211,7 +211,7 @@ async def subscribe(ctx: commands.Context):
 @commands.guild_only()
 @wxgrp.command(name="status")
 async def wx_status(ctx: commands.Context):
-    """ Shows bot options and stats. """
+    """ Display parameters and API stats """
     stats = w_client.stats()
     content = "## Bot status:\n"
 
