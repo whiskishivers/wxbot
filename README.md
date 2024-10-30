@@ -4,38 +4,40 @@ Wx bot utilizes the discord py framework and weather.gov API to post weather ale
 ## Requirements
 * Third party Python modules:
   * requests
-  * discord
+  * discord.py
 
 ## Setup
-1. Modify wx-bot.py and add your discord API token (scroll all the way down).
-1. Run wx-bot.py.
-1. Once the bot connects, be sure to secure command permissions in your Integrations page in server settings.
-1. Run `/wx subscribe` in your alerts channel. The bot will confirm your choice.
-1. Set your desired alert area with `/wx set area` or `/wx set zone`. See below.
-1. Wait about five minutes. Any active alerts for your area will be posted.
+1. Make a `DISCORDTOKEN` environment variable that contains your bot's API token.
+2. Run wx-bot.py.
+3. Use the Integrations page under Server Settings in your server to set permissions for the commands.
+4. Run `/wx subscribe` in your alerts channel. The bot will confirm your choice.
+5. Set your desired filter with `/wx set area` or `/wx set zone`. See example section for more info.
+6. Wait about five minutes. Any active alerts for your area will be posted.
 
-The bot will check for alerts every 5 minutes. This interval will be shortened to 1 minute when immediate extreme alerts are active.
+The API query interval is 5 minutes and will reduce to 1 minute when extreme weather alerts are active.
 
 ## Commands
-`/wx pause` - Pause or resume alert checks (default: False)
+`/wx pause` - Pause or resume alert checks
 
-`/wx purge` - Clear cache and delete all alert messages.
+`/wx purge` - Clear cache and delete all alerts. Note: This is sluggish due to API rate limiting
 
-`/wx prune` - Enable or disable deletion of expired alert messages (default: True)
+`/wx prune` - Toggle removal of expired alerts (Default: enabled)
 
-`/wx status` - Displays currently set options and API stats
+`/wx status` - Display parameters and API stats
 
-`/wx subscribe` - Run this in a channel to have alerts posted there. Only one channel can subscribe at a time
+`/wx subscribe` - Tells the bot where to post. Use it in the channel you want alerts in.
 
-`/wx set area` - Set the area(s) from which alerts should be posted. For more info, visit weather.gov
+`/wx set area` - Set the area(s) from which alerts should be posted. See examples below.
 
-`/wx set zone` - Set the zone(s) from which alerts should be posted. For more info, visit weather.gov
+`/wx set zone` - Set the zone(s) from which alerts should be posted. See examples below.
 
 ## Area/Zone parameter examples
-You can look up area and zone identifiers on the [NWS alerts page](https://alerts.weather.gov/). The commands can support multiple IDs when separated by commas.
+The [NWS alerts page](https://alerts.weather.gov/) contains every zone and area identifier you can use. An area contains many zones. Example: All states are areas, all counties are zones. If you are using the bot for a very specific geographical location, it is best to specify a zone so that only relevant alerts are posted.
+
+The bot filters one type only (area or zone). Multiple areas/zones must be comma separated.
 
 Alerts for the entire state of California: `/wx set area CA`
 
 Alerts for Hawaii coastal and land areas: `/wx set area HI,PH`
 
-Alerts for Albany and Bronx counties in New York: `/wx set zone NYC001,NYC005`
+Alerts for the Gulf of Mexico marine zones near Pensacola, FL and Panama City, FL: `/wx set zone GMZ750,GMZ634`

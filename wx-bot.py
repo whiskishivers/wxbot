@@ -3,6 +3,7 @@
 from asyncio import sleep as sleep
 import discord
 from discord.ext import commands, tasks
+import os
 import re
 import requests
 import wx
@@ -15,7 +16,8 @@ class CustomBot(commands.Bot):
         self.alert_params = None
         self.cached_alerts = dict()
         self.check_interval = 5.0
-        self.paused = False
+        self.pause_alerts = False
+        self.post_count = 0
         self.prune = True
 
     async def setup_hook(self) -> None:
@@ -29,13 +31,13 @@ class CustomBot(commands.Bot):
     @tasks.loop(minutes=1.0)
     async def check_alerts(self):
         try:
-            if self.paused or len(bot.alert_params) == 0 or self.alert_channel is None:
+            if self.pause_alerts or len(bot.alert_params) == 0 or self.alert_channel is None:
                 return
         except TypeError:
             return
 
         # Get active alerts
-        alerts = sorted(w_client.alerts.active_properties(**self.alert_params), key=lambda x: x.sent)
+        alerts = sorted(w_client.alerts.active(**self.alert_params), key=lambda x: x.sent)
 
         # Set lower task interval when extreme alerts exist
         if len([i for i in alerts if i.severity == "Extreme" and i.urgency == "Immediate"]) > 0:
@@ -62,13 +64,14 @@ class CustomBot(commands.Bot):
         # Post new alerts
         new_ids = active_ids - posted_ids
         for alert in alerts:
-            if self.paused:
+            if self.pause_alerts:
                 return
 
             if alert.id in new_ids:
                 try:
                     self.cached_alerts[alert.id] = await self.alert_channel.send(content=f"### {alert.headline}",
                                                                                  embed=alert.embed)
+                    self.post_count += 1
                     print(f"Posted: {alert.headline}")
                 except discord.errors.Forbidden:
                     print(f"ERROR: Permission error while posting alert {alert.id}")
@@ -108,12 +111,13 @@ async def set_area(ctx: commands.Context, area_id: str):
         return
 
     try:
-        resp = w_client.alerts.active_properties(area=area_id.upper())
+        resp = w_client.alerts.active(area=area_id.upper())
     except requests.exceptions.HTTPError as e:
         await ctx.send(f"weather.gov api returned {e.response.status_code} {e.response.reason}. Cannot set area",
                        ephemeral=True)
         return
     bot.alert_params = {"area": area_id}
+    print(f"Params set: {bot.alert_params}")
     await ctx.send("✅ Area set!", ephemeral=True)
 
 
@@ -129,7 +133,7 @@ async def set_zone(ctx: commands.Context, zone_id: str):
         return
 
     try:
-        resp = w_client.alerts.active_properties(zone=zone_id.upper())
+        resp = w_client.alerts.active(zone=zone_id.upper())
     except requests.exceptions.HTTPError as e:
         await ctx.send(f"weather.gov api returned {e.response.status_code} {e.response.reason}. Cannot set zone.",
                        ephemeral=True)
@@ -140,30 +144,38 @@ async def set_zone(ctx: commands.Context, zone_id: str):
 
 
 @commands.guild_only()
-@wxset.command(name="pause")
-async def set_pause(ctx: commands.Context, pause: bool):
-    """ Pause or resume alert checks """
-    bot.paused = pause
-    if bot.paused:
-        await bot.change_presence(status=discord.Status.idle)
-        await ctx.send("✅ Alert checks paused.", ephemeral=True)
-    else:
+@wxgrp.command(name="pause")
+async def toggle_pause(ctx: commands.Context):
+    """ Display parameters and API stats """
+    if bot.pause_alerts:
+        # Toggle resume
+        bot.pause_alerts = False
         await bot.change_presence(status=discord.Status.online)
-        await ctx.send("✅ Alert checks resumed.", ephemeral=True)
+        await ctx.send("✅ ▶️ Alert checking resumed.", ephemeral=True)
+    else:
+        # Toggle pause
+        bot.pause_alerts = True
+        await bot.change_presence(status=discord.Status.idle)
+        await ctx.send("✅ ⏸️ Alert checking paused.", ephemeral=True)
 
 
 @commands.guild_only()
-@wxset.command(name="prune")
-async def set_prune(ctx: commands.Context, prune: bool):
-    """ Enable or disable deletion of expired alerts """
-    bot.prune = prune
-    await ctx.send(f"✅ Pruning: {bot.prune}", ephemeral=True)
+@wxgrp.command(name="prune")
+async def toggle_pruning(ctx: commands.Context):
+    """ Toggle removal of expired alerts """
+    if bot.prune:
+        bot.prune = False
+        msg = f"Disabled alert pruning."
+    else:
+        bot.prune = True
+        msg = f"Enabled alert pruning."
+    await ctx.send(f"✅ {msg}", ephemeral=True)
 
 
 @commands.guild_only()
 @wxgrp.command(name="purge")
 async def purge(ctx: commands.Context):
-    """ Delete all posted messages. """
+    """ Clear cache and delete all alerts """
     if bot.alert_channel is None:
         return
 
@@ -184,7 +196,7 @@ async def purge(ctx: commands.Context):
 @commands.guild_only()
 @wxgrp.command(name="subscribe")
 async def subscribe(ctx: commands.Context):
-    """ Run this command in the alert channel so the bot knows where to post """
+    """ Tells the bot where to post. Use it in the channel you want alerts in """
     if ctx.channel is None:
         return
     try:
@@ -204,27 +216,26 @@ async def wx_status(ctx: commands.Context):
     content = "## Bot status:\n"
 
     if bot.alert_params is None:
-        content += "⚠️ **Alert parameters are not set.**. Use `/wx set area (area_id)` or `/wx set zone (zone_id)`.\n"
+        content += "⚠️ **Alert parameters are not set.** Use `/wx set area (area_id)` or `/wx set zone (zone_id)`.\n"
 
     if bot.alert_channel is None:
         content += "⚠️ **Alert channel is not set**. Use `/wx subscribe` in the alert channel to set it.\n"
     else:
         content += f"Alert channel: {bot.alert_channel.mention}\n"
 
-    content += f"Cached alerts: {len(bot.cached_alerts)}\n" \
-               f"Current parameters: {bot.alert_params}\n" \
+    content += f"Alerts: {bot.post_count} posted. {len(bot.cached_alerts)} currently active.\n" \
                f"Current interval: {bot.check_alerts.minutes} minutes\n" \
-               f"Paused: {bot.paused}\n" \
+               f"Filter parameters: {bot.alert_params}\n" \
+               f"Paused: {bot.pause_alerts}\n" \
                f"Pruning: {bot.prune}\n" \
-               f"API calls: {stats['get_count']}\n" \
-               f"API bytes received: {stats['bytes_recvd']}\n" \
+               f"API calls: {stats['get_count']} ({stats['bytes_recvd']})\n" \
                f"API last good call: {stats['last_ok']}"
 
     await ctx.send(content, ephemeral=True)
 
 
 if __name__ == '__main__':
-    # weather.gov api client
     w_client = wx.Client()
-
-    bot.run("discord bot token goes here")
+    ping = w_client.ping()
+    print(f"Client loaded. Ping: {ping}")
+    bot.run(os.environ["DISCORDTOKEN"])

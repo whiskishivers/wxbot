@@ -10,7 +10,7 @@ severity_color = {("Severe", "Immediate"): discord.Color.gold(),
                   ("Extreme", "Immediate"): discord.Color.red()}
 
 
-class Alert:
+class WeatherAlert:
     def __init__(self, wxalert):
         """Alert object with only the required fields for the project."""
         self.description = wxalert["description"]
@@ -49,8 +49,8 @@ class Alert:
         return f'<Alert:{self.id}>'
 
     @property
-    def embed(self):
-        """ Discord embed object """
+    def embed(self) -> discord.Embed:
+        """ Embed for chat response """
         color = severity_color.get((self.severity, self.urgency), None)
         embed = discord.Embed(color=color,
                               title=self.event,
@@ -61,7 +61,7 @@ class Alert:
             embed.add_field(name="Instructions", value=self.instruction[:1024], inline=False)
         embed.add_field(name="Urgency", value=self.urgency)
         embed.add_field(name="Severity", value=self.severity)
-        embed.add_field(name="Response", value=self.response)
+        # embed.add_field(name="Response", value=self.response)
 
         if self.wmo:
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
@@ -69,7 +69,7 @@ class Alert:
         return embed
 
     @property
-    def reference_id(self):
+    def reference_id(self) -> str:
         """The latest alert that is being updated. Returns None if no references exist."""
         try:
             return self.references[-1]['identifier']
@@ -89,22 +89,18 @@ class Alerts:
             return self.parent.get(f"alerts/{alertID}", params=params)
         return self.parent.get(f'alerts', params=params)
 
-    def active(self, **params):
-        """ Returns all currently active alerts """
-        return self.parent.get("alerts/active", params=params)
-
-    def active_properties(self, **params):
-        """ Get active alerts and wrap them into the Alert class."""
-        alerts = self.active(**params)
-        return [Alert(a["properties"]) for a in alerts["features"]]
+    def active(self, **params) -> list[WeatherAlert]:
+        """ Alerts in the WeatherAlert class."""
+        alerts = self.parent.get("alerts/active", params=params)
+        return [WeatherAlert(a["properties"]) for a in alerts["features"]]
 
 
 class Client:
-    """ Basic client for retrieving active alerts from weather.gov API."""
+    """ Basic client for querying weather.gov API."""
 
     def __init__(self, track_stats=True):
         self.base_url = "https://api.weather.gov"
-        self.headers = {"User-Agent": "Discord weather bot | python-requests"}
+        self.headers = {"User-Agent": "python-requests | Discord weather bot"}
         self.session = requests.Session()
         self.get_count = 0
         self.bytes_recvd = 0
@@ -113,15 +109,21 @@ class Client:
 
         self.alerts = Alerts(self)
 
-    def get(self, endpoint: str, params: dict = None):
-        """ Basic get for api endpoints"""
+    def get(self, endpoint: str, params: dict = None) -> dict:
+        """ Basic get for api endpoints """
         with self.session.get(f"{self.base_url}/{endpoint}", headers=self.headers, params=params, timeout=5) as resp:
             if self._track_stats:
                 self.get_count += 1
                 self.bytes_recvd += len(resp.content)
             resp.raise_for_status()  # api error
             self.last_ok = dt.datetime.now()
+            print(f"{self.base_url}/{endpoint}")
             return resp.json()
+
+    def ping(self):
+            if self.get("") == {"status": "OK"}:
+                return "OK"
+            return None
 
     def stats(self):
         if self.last_ok is None:
