@@ -231,7 +231,7 @@ async def wx_status(ctx: commands.Context):
     content = ""
 
     if None in (bot.alert_params, bot.alert_channel):
-        content += "⚠️ ** Set-up is not complete!** ⚠️\n"
+        content += "⚠️ ** Incomplete setup!** ⚠️\n"
         if bot.alert_params is None:
             content += "**Set alert filters.** Use `/wx set area (area_id)` or `/wx set zone (zone_id)`.\n"
 
@@ -241,13 +241,13 @@ async def wx_status(ctx: commands.Context):
         content += f"Alerts are posted in {bot.alert_channel.mention}. **{len(bot.cached_alerts)}** are currently active. " \
                    f"**{bot.post_count}** have been posted.\n"
 
-    content += f"Checking alerts every {bot.check_alerts.minutes} minutes.\n" \
+    content += f"Checking alerts every **{bot.check_alerts.minutes}** minutes.\n" \
                f"Filter parameters: `{bot.alert_params}`\n"
 
     if bot.pause_alerts:
         content += "Alert checks are **paused**. "
     else:
-        content += "Alert checks are **running**. "
+        content += "Alert checks are **not paused**. "
 
     if bot.prune:
         content += "Expired alerts will be **deleted**.\n"
