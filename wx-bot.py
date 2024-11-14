@@ -100,20 +100,17 @@ class CustomBot(commands.Bot):
                     break
                 new_ids.remove(alert.id)
 
-
 intents = discord.Intents.default()
-bot = CustomBot(intents=intents, command_prefix=".")
 
+bot = CustomBot(intents=intents, command_prefix=".")
 
 @bot.hybrid_group(name="wx")
 async def wxgrp(ctx):
     pass
 
-
 @wxgrp.group(name="set")
 async def wxset(ctx):
     pass
-
 
 @commands.guild_only()
 @wxset.command(name="area")
@@ -157,7 +154,6 @@ async def set_zone(ctx: commands.Context, zone_id: str):
     print(f"Params set: {bot.alert_params}")
     await ctx.send(f"✅ Zone set: {", ".join(set(i.name for i in zones.features))}", ephemeral=True)
 
-
 @commands.guild_only()
 @wxgrp.command(name="pause")
 async def toggle_pause(ctx: commands.Context):
@@ -173,7 +169,6 @@ async def toggle_pause(ctx: commands.Context):
         await bot.change_presence(status=discord.Status.idle)
         await ctx.send("✅ ⏸️ Alert checking paused.", ephemeral=True)
 
-
 @commands.guild_only()
 @wxgrp.command(name="prune")
 async def toggle_prune(ctx: commands.Context):
@@ -185,7 +180,6 @@ async def toggle_prune(ctx: commands.Context):
         bot.prune = True
         msg = f"Enabled alert pruning."
     await ctx.send(f"✅ {msg}", ephemeral=True)
-
 
 @commands.guild_only()
 @wxgrp.command(name="purge")
@@ -204,7 +198,6 @@ async def purge(ctx: commands.Context):
         bot.cached_alerts.clear()
         await ctx.send(f"All alerts cleared.", ephemeral=True)
 
-
 @commands.guild_only()
 @wxgrp.command(name="subscribe")
 async def subscribe(ctx: commands.Context):
@@ -218,7 +211,6 @@ async def subscribe(ctx: commands.Context):
         bot.alert_channel = ctx.channel
     except discord.errors.Forbidden:
         await ctx.send(f"Error! The bot is not allowed to post here. Check bot permissions.", ephemeral=True)
-
 
 @commands.guild_only()
 @wxgrp.command(name="status")
