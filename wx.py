@@ -111,13 +111,9 @@ class Alert(Feature):
     @property
     def embed_inactive(self) -> discord.Embed:
         """ Embed for editing inactive chat messages """
-        if self.ends:
-            timestamp = self.expires
-        else:
-            timestamp = self.sent
 
         embed = discord.Embed(title=self.event, url=f"https://alerts.weather.gov/search?id={self.id}",
-                              description="*This alert is no longer active.*", timestamp=timestamp)
+                              description="*This alert is no longer active.*", timestamp=self.sent)
         if self.wmo:
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
             embed.set_author(name=self.senderName, url=author_url)
@@ -179,8 +175,6 @@ class ClientZones:
         if zone_id:
             params["id"] = zone_id
             return FeatureCollection(self.parent.get(f"zones", params=params))
-
-
 
 class Client:
     """ Basic client for querying weather.gov API."""
