@@ -38,7 +38,8 @@ class CustomBot(commands.Bot):
             return
 
         # Get active alerts
-        alerts = sorted(cli.alerts.active(**self.alert_params), key=lambda x: x.sent)
+        alerts = cli.alerts.active(**self.alert_params)
+        alerts.sort(key=lambda x:x.sent)
 
         # Set lower task interval when big bad alerts exist
         if len([i for i in alerts if i.severity == "Extreme" and i.urgency == "Immediate"]) > 0:
@@ -97,11 +98,7 @@ class CustomBot(commands.Bot):
                 except discord.errors.NotFound:
                     print(f"ERROR: Not Found error while posting alert {alert.id}")
                     break
-
                 new_ids.remove(alert.id)
-
-        print(
-            f"Queries: {cli.get_count}. Interval: {self.check_interval}. Cached: {len(self.cached_alerts)}.")
 
 
 intents = discord.Intents.default()
@@ -227,7 +224,6 @@ async def subscribe(ctx: commands.Context):
 @wxgrp.command(name="status")
 async def wx_status(ctx: commands.Context):
     """ Display parameters and API stats """
-    stats = cli.stats()
     content = ""
 
     if None in (bot.alert_params, bot.alert_channel):
@@ -253,10 +249,6 @@ async def wx_status(ctx: commands.Context):
         content += "Expired alerts will be **deleted**.\n"
     else:
         content += "Expired alerts will be **edited**.\n"
-
-
-    content += f"API calls: *{stats['get_count']} ({stats['bytes_recvd']})*\n" \
-               f"API last good call: *{stats['last_ok']}*"
 
     await ctx.send(content, ephemeral=True)
 
