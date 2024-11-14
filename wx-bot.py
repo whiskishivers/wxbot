@@ -155,7 +155,7 @@ async def set_zone(ctx: commands.Context, zone_id: str):
         return
     bot.alert_params = {"zone": zone_id.upper()}
     print(f"Params set: {bot.alert_params}")
-    await ctx.send(f"✅ Zone set: {", ".join(set(i.name for i in zones))}", ephemeral=True)
+    await ctx.send(f"✅ Zone set: {", ".join(set(i.name for i in zones.features))}", ephemeral=True)
 
 
 @commands.guild_only()

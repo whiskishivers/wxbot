@@ -172,6 +172,16 @@ class ClientOffice:
         if office_id:
             return GovernmentOrganization(self.parent.get(f"offices/{office_id.upper()}"))
 
+class ClientZones:
+    def __init__(self, parent):
+        self.parent = parent
+    def __call__(self, zone_id: str = None, **params):
+        if zone_id:
+            params["id"] = zone_id
+            return FeatureCollection(self.parent.get(f"zones", params=params))
+
+
+
 class Client:
     """ Basic client for querying weather.gov API."""
     def __init__(self, track_stats=True):
@@ -179,6 +189,7 @@ class Client:
         self.session = requests.Session()
         self.alerts = ClientAlerts(self)
         self.office = ClientOffice(self)
+        self.zones = ClientZones(self)
 
     def get(self, endpoint: str, raw=False, params: dict = None) -> dict:
         """ GET requests  """
