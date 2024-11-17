@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-from asyncio import sleep as sleep
+import asyncio
 import discord
 from discord.ext import commands, tasks
 import os
@@ -36,11 +36,11 @@ class CustomBot(commands.Bot):
                 return
         except TypeError:
             return
+        print(f"Loop: {self.check_alerts.current_loop}. Total API calls: {cli.get_count}.")
 
         # Get active alerts
-        alerts = cli.alerts.active(**self.alert_params)
-        alerts.sort(key=lambda x:x.sent)
-
+        alerts = cli.alerts.active(severity="Moderate,Severe,Extreme,Unknown", status="actual", **self.alert_params)
+        alerts.sort(key=lambda x:x.onset)
         # Set lower task interval when big bad alerts exist
         if len([i for i in alerts if i.severity == "Extreme" and i.urgency == "Immediate"]) > 0:
             self.check_interval = 1.0
@@ -48,7 +48,6 @@ class CustomBot(commands.Bot):
             self.check_interval = 5.0
         self.check_alerts.change_interval(minutes=self.check_interval)
 
-        # Sets for determining new/expired alerts
         active_ids, posted_ids = set(i.id for i in alerts), set(self.cached_alerts.keys())
 
         # Edit or delete inactive alerts
@@ -82,13 +81,18 @@ class CustomBot(commands.Bot):
 
         # Post new alerts
         new_ids = active_ids - posted_ids
+        if len(new_ids):
+            async with self.alert_channel.typing():
+                await asyncio.sleep(2.0)
         for alert in alerts:
             if self.pause_alerts:
                 break
             if alert.id in new_ids:
                 try:
-                    alert.discord_msg = await self.alert_channel.send(content=f"**{alert.headline}**",
-                                                                      embed=alert.embed)
+                    async with self.alert_channel.typing():
+                        await asyncio.sleep(0.5)
+                        alert.discord_msg = await self.alert_channel.send(content=f"**{alert.headline}**",
+                                                                          embed=alert.embed)
                     self.cached_alerts[alert.id] = alert
                     self.post_count += 1
                     print(f"Posted: {alert.event}")
@@ -140,31 +144,47 @@ async def set_zone(ctx: commands.Context, zone_id: str):
     valid_id = re.compile(r"^[0-9a-zA-Z,]+$")
     zone_id = zone_id.upper()
 
+    # validate characters
     if not valid_id.fullmatch(zone_id):
         await ctx.send("Invalid zone ID. Letters, numbers, and commas only.", ephemeral=True)
         return
 
+    # Bad syntax if the api fails
     try:
         zones = cli.zones(zone_id)
     except requests.exceptions.HTTPError as e:
         await ctx.send(f"weather.gov api returned {e.response.status_code} {e.response.reason}. Cannot set zone.",
                        ephemeral=True)
         return
+
     bot.alert_params = {"zone": zone_id.upper()}
     print(f"Params set: {bot.alert_params}")
-    await ctx.send(f"✅ Zone set: {", ".join(set(i.name for i in zones.features))}", ephemeral=True)
+    await ctx.send(f"✅ Zone set: {", ".join(set(i.name for i in zones))}", ephemeral=True)
+
+@commands.guild_only()
+@wxgrp.command(name="force")
+async def force(ctx: commands.Context):
+    """ Immediately check for alerts """
+    bot.pause_alerts = False
+    bot.check_alerts.stop()
+    bot.check_alerts.restart()
+    await bot.change_presence(status=discord.Status.online)
+    await ctx.send("✅ Alert check forced.", ephemeral=True)
 
 @commands.guild_only()
 @wxgrp.command(name="pause")
 async def toggle_pause(ctx: commands.Context):
     """ Pause or resume alert checks """
     if bot.pause_alerts:
-        # Toggle resume
+        # resume
         bot.pause_alerts = False
+        bot.check_alerts.stop()
+        bot.check_alerts.restart()
         await bot.change_presence(status=discord.Status.online)
         await ctx.send("✅ ▶️ Alert checking resumed.", ephemeral=True)
     else:
-        # Toggle pause
+        # pause
+        bot.check_alerts.stop()
         bot.pause_alerts = True
         await bot.change_presence(status=discord.Status.idle)
         await ctx.send("✅ ⏸️ Alert checking paused.", ephemeral=True)
@@ -175,10 +195,10 @@ async def toggle_prune(ctx: commands.Context):
     """ Toggle removal of expired alerts """
     if bot.prune:
         bot.prune = False
-        msg = f"Disabled alert pruning."
+        msg = f"Disabled alert pruning. Inactive alert messages will be edited."
     else:
         bot.prune = True
-        msg = f"Enabled alert pruning."
+        msg = f"Enabled alert pruning. Inactive alert messages will be deleted."
     await ctx.send(f"✅ {msg}", ephemeral=True)
 
 @commands.guild_only()
@@ -231,17 +251,14 @@ async def wx_status(ctx: commands.Context):
 
     content += f"Checking alerts every **{bot.check_alerts.minutes}** minutes.\n" \
                f"Filter parameters: `{bot.alert_params}`\n"
-
     if bot.pause_alerts:
         content += "Alert checks are **paused**. "
     else:
         content += "Alert checks are **not paused**. "
-
     if bot.prune:
         content += "Expired alerts will be **deleted**.\n"
     else:
         content += "Expired alerts will be **edited**.\n"
-
     await ctx.send(content, ephemeral=True)
 
 

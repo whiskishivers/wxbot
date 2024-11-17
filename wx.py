@@ -3,25 +3,22 @@ import discord
 import requests
 import re
 
-class FeatureCollection:
+class FeatureCollection(list):
     """ Default object from API"""
     def __init__(self, fcoll):
+        super().__init__()
         self.title = fcoll.get("title", None)
-        self.features = []
         for feature in fcoll["features"]:
             match feature["properties"]["@type"]:
                 case "wx:Alert":
-                    self.features.append(Alert(feature))
+                    self.append(Alert(feature))
                 case "wx:Zone":
-                    self.features.append(Zone(feature))
+                    self.append(Zone(feature))
                 case _:
-                    self.features.append(Feature(feature))
+                    self.append(Feature(feature))
 
-    def __iter__(self):
-        return self.features.__iter__()
-
-    def sort(self,**params):
-        return self.features.sort(**params)
+    def __repr__(self):
+        return f"FeatureCollection({self.title})"
 
 class Feature:
     id: str = None
@@ -36,6 +33,8 @@ class Feature:
 class Alert(Feature):
     areaDesc: str = ""
     description: str = ""
+    discord_msg: discord.Message | None = None
+    effective: dt.datetime | None = None
     ends: dt.datetime = None
     event: str = ""
     expires: dt.datetime | None = None
@@ -43,9 +42,10 @@ class Alert(Feature):
     parameters: dict = dict()
     senderName: str = ""
     sent: dt.datetime | None = None
+    onset: dt.datetime | None = None
     severity: str = ""
     urgency: str = ""
-    wmo: str
+    wmo: str | None
     _alert_colors = {("Severe", "Expected"): discord.Color.dark_gold(),
                      ("Severe", "Future"): discord.Color.dark_gold(),
                      ("Severe", "Immediate"): discord.Color.gold(),
@@ -60,7 +60,7 @@ class Alert(Feature):
         self.nws_headline = self.parameters.get("NWSheadline", None)
         try:
             self.wmo = self.parameters["WMOidentifier"][0].split(" ")[1][-3:]
-        except:
+        except (KeyError, TypeError):
             self.wmo = None
 
         # Fold extra line breaks
@@ -80,40 +80,36 @@ class Alert(Feature):
 
     @property
     def embed(self) -> discord.Embed:
-        """ Embed for the chat message """
+        """ Chat embed """
         color = self._alert_colors.get((self.severity, self.urgency), None)
-        instruction = None
         description = ""
-        # Non-urgent alerts only include area descriptions. Immediate alerts include full description.
+        instruction = None
         if self.urgency == "Immediate":
             description += self.description[:4096]
             if self.instruction:
                 instruction = self.instruction[:1024]
-        else:
-            if self.nws_headline:
-                description += f"{"\n".join(self.nws_headline)}\n\n"
-                areas = self.areaDesc.split(";")
-                areas = [i.strip() for i in areas]
-                areas.sort()
-                description += "\n".join(areas)
-
+        # Use short headline and area list for non-urgent alerts
+        elif self.nws_headline:
+            description += f"{"\n".join(self.nws_headline)}\n\n"
+            areas = self.areaDesc.split(";")
+            areas = [i.strip() for i in areas]
+            areas.sort()
+            description += "\n".join(areas)
         embed = discord.Embed(color=color, title=self.event, url=f"https://alerts.weather.gov/search?id={self.id}",
-                              description=description, timestamp=self.sent)
+                              description=description, timestamp=self.onset)
         if self.wmo:
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
             embed.set_author(name=self.senderName, url=author_url)
         if instruction is not None:
             embed.add_field(name="Instructions", value=instruction, inline=False)
-
         embed.add_field(name="Severity", value=f"{self.severity} - {self.urgency}")
         return embed
 
     @property
     def embed_inactive(self) -> discord.Embed:
         """ Embed for editing inactive chat messages """
-
         embed = discord.Embed(title=self.event, url=f"https://alerts.weather.gov/search?id={self.id}",
-                              description="*This alert is no longer active.*", timestamp=self.sent)
+                              description="*This alert is no longer active.*")
         if self.wmo:
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
             embed.set_author(name=self.senderName, url=author_url)
@@ -125,6 +121,9 @@ class Zone(Feature):
 
     def __repr__(self):
         return f"Zone({self.id})"
+
+    def active_alerts(self):
+        return client.alerts.active(zone=self.id)
 
 class GovernmentOrganization:
     id: str
@@ -172,7 +171,6 @@ class ClientZones:
     def __init__(self, parent):
         self.parent = parent
     def __call__(self, zone_id: str = None, **params):
-        if zone_id:
             params["id"] = zone_id
             return FeatureCollection(self.parent.get(f"zones", params=params))
 
@@ -181,6 +179,7 @@ class Client:
     def __init__(self, track_stats=True):
         self.headers = {"User-Agent": "python-requests | Discord weather bot"}
         self.session = requests.Session()
+        self.get_count = 0
         self.alerts = ClientAlerts(self)
         self.office = ClientOffice(self)
         self.zones = ClientZones(self)
@@ -193,6 +192,7 @@ class Client:
         if raw:
             url = endpoint
         with self.session.get(url=url, headers=self.headers, params=params, timeout=5) as resp:
+            self.get_count += 1
             print(f"API GET: {resp.status_code} {resp.url}")
             resp.raise_for_status()  # api error
             return resp.json()
