@@ -138,6 +138,22 @@ async def set_area(ctx: commands.Context, area_id: str):
     await ctx.send("✅ Area set!", ephemeral=True)
 
 @commands.guild_only()
+@wxset.command(name="point")
+async def set_point(ctx: commands.Context, latitude: float, longitude: float):
+    """ Set the GPS coordinates from which alerts will be posted """
+    latitude = float(latitude)
+    longitude = float(longitude)
+    try:
+        point = cli.points(latitude, longitude)
+    except requests.exceptions.HTTPError as e:
+        await ctx.send(f"API failed when looking up geo point. {e.response.status_code}", ephemeral=True)
+        return
+
+    bot.alert_params = {"zone": point.zone.id}
+    print(f"Params set: {bot.alert_params}")
+    await ctx.send(f"✅ Zone set: {point.zone.id}: {point.zone.name}", ephemeral=True)
+
+@commands.guild_only()
 @wxset.command(name="zone")
 async def set_zone(ctx: commands.Context, zone_id: str):
     """ Set the zone(s) from which alerts will be posted """
@@ -149,17 +165,20 @@ async def set_zone(ctx: commands.Context, zone_id: str):
         await ctx.send("Invalid zone ID. Letters, numbers, and commas only.", ephemeral=True)
         return
 
+    split_ids = zone_id.split(",")
+    split_ids = [i.strip() for i in split_ids]
+
     # Bad syntax if the api fails
     try:
-        zones = cli.zones(zone_id)
+        zones = cli.zones(*split_ids)
     except requests.exceptions.HTTPError as e:
         await ctx.send(f"weather.gov api returned {e.response.status_code} {e.response.reason}. Cannot set zone.",
                        ephemeral=True)
         return
 
-    bot.alert_params = {"zone": zone_id.upper()}
+    bot.alert_params = {"zone": ",".join(i.id for i in zones)}
     print(f"Params set: {bot.alert_params}")
-    await ctx.send(f"✅ Zone set: {", ".join(set(i.name for i in zones))}", ephemeral=True)
+    await ctx.send(f"✅ Zone set:\n {"\n".join(i.name for i in zones)}", ephemeral=True)
 
 @commands.guild_only()
 @wxgrp.command(name="force")
@@ -178,13 +197,10 @@ async def toggle_pause(ctx: commands.Context):
     if bot.pause_alerts:
         # resume
         bot.pause_alerts = False
-        bot.check_alerts.stop()
-        bot.check_alerts.restart()
         await bot.change_presence(status=discord.Status.online)
         await ctx.send("✅ ▶️ Alert checking resumed.", ephemeral=True)
     else:
         # pause
-        bot.check_alerts.stop()
         bot.pause_alerts = True
         await bot.change_presence(status=discord.Status.idle)
         await ctx.send("✅ ⏸️ Alert checking paused.", ephemeral=True)
@@ -259,6 +275,9 @@ async def wx_status(ctx: commands.Context):
         content += "Expired alerts will be **deleted**.\n"
     else:
         content += "Expired alerts will be **edited**.\n"
+
+    content += f"NWS API has been called **{cli.get_count}** times."
+
     await ctx.send(content, ephemeral=True)
 
 

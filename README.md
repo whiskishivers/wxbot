@@ -16,27 +16,28 @@ Wx bot utilizes the discord py framework and weather.gov API to post weather ale
 
 
 ## Features
-- The bot is configured to post alerts with severity of **unknown, moderate, severe, or extreme**. Other alerts are
-ignored.
-- Alerts are queried at a 5-minute interval. The interval is shortened to 1 minute when any alert has **extreme**
-severity and **immediate** urgency.
-- Alerts with **immediate** urgency include the full description. Other alerts will include the shortened headline and
-affected zone names.
+- The bot posts alerts with **unknown, moderate, severe, or extreme** severity. Other alerts are ignored.
+- Alert checks run every 5 minutes. When **immediate** alerts are found with **extreme** severity, the interval drops
+to 1 minute.
+- Alerts with **immediate** urgency include the full description. Other alerts will include the NWS headline and a
+list of affected zones.
 
 ## Commands
 `/wx force` - Unpause and immediately check for alerts
 
-`/wx pause` - Stop or start alert checks. The bot will appear idle or online to reflect this state.
+`/wx pause` - Toggle suspension of alert checks. The bot will appear idle or online to reflect this state.
 
-`/wx purge` - Delete all posted messages and clear message cache. Note: This is sluggish due to API rate limiting
+`/wx purge` - Delete all alert messages and clear message cache.
 
 `/wx prune` - Toggle between editing or deleting inactive alert messages (Default: edit)
 
 `/wx status` - Display parameters and API stats
 
-`/wx subscribe` - Tells the bot where to post. Use it in the channel you want alerts in
+`/wx subscribe` - Set the alert channel. Use it in the channel you want alerts in
 
 `/wx set area` - Set the area(s) from which alerts should be posted. See examples below
+
+`/wx set point` - Provide a GPS coordinate. Alerts from the matching zone will be posted
 
 `/wx set zone` - Set the zone(s) from which alerts should be posted. See examples below
 
@@ -44,7 +45,7 @@ affected zone names.
 Visit the [NWS alerts page](https://alerts.weather.gov/) to look up zone and area identifiers. If you are only
 interested in a very specific geographical location, it is best to use the area or zone that most closely defines it.
 
-The bot filters one type only (area or zone). Multiple areas/zones must be comma separated.
+The bot filters on one type at a time (area or zone). Multiple areas/zones must be comma separated.
 
 Alerts for the entire state of California: `/wx set area CA`
 

@@ -4,14 +4,18 @@ import requests
 import re
 
 class FeatureCollection(list):
-    """ Default object from API"""
-    def __init__(self, fcoll):
+    """ Default object from API """
+    def __init__(self, fcoll=dict()):
         super().__init__()
         self.title = fcoll.get("title", None)
+        if len(fcoll) == 0:
+            return
         for feature in fcoll["features"]:
             match feature["properties"]["@type"]:
                 case "wx:Alert":
                     self.append(Alert(feature))
+                case "wx:Point":
+                    self.append(Point(feature))
                 case "wx:Zone":
                     self.append(Zone(feature))
                 case _:
@@ -64,7 +68,8 @@ class Alert(Feature):
             self.wmo = None
 
         # Fold extra line breaks
-        self.description = re.sub(r'(?<!\n)\n(?!\n)', ' ', self.description)
+        if self.description is not None:
+            self.description = re.sub(r'(?<!\n)\n(?!\n)', ' ', self.description)
         if self.instruction is not None:
             self.instruction = re.sub(r'(?<!\n)\n(?!\n)', ' ', self.instruction)
 
@@ -86,8 +91,6 @@ class Alert(Feature):
         instruction = None
         if self.urgency == "Immediate":
             description += self.description[:4096]
-            if self.instruction:
-                instruction = self.instruction[:1024]
         # Use short headline and area list for non-urgent alerts
         elif self.nws_headline:
             description += f"{"\n".join(self.nws_headline)}\n\n"
@@ -95,14 +98,23 @@ class Alert(Feature):
             areas = [i.strip() for i in areas]
             areas.sort()
             description += "\n".join(areas)
-        embed = discord.Embed(color=color, title=self.event, url=f"https://alerts.weather.gov/search?id={self.id}",
-                              description=description, timestamp=self.onset)
+
+        embed = discord.Embed(color=color,
+                              title=self.event,
+                              url=f"https://alerts.weather.gov/search?id={self.id}",
+                              description=description,
+                              timestamp=self.onset)
+
+        if self.instruction:
+            instruction = self.instruction[:1024]
+            embed.add_field(name="Instructions", value=instruction, inline=False)
+        embed.add_field(name="Severity", value=f"{self.severity}")
+        embed.add_field(name="Urgency", value=self.urgency)
+
         if self.wmo:
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
             embed.set_author(name=self.senderName, url=author_url)
-        if instruction is not None:
-            embed.add_field(name="Instructions", value=instruction, inline=False)
-        embed.add_field(name="Severity", value=f"{self.severity} - {self.urgency}")
+
         return embed
 
     @property
@@ -114,6 +126,13 @@ class Alert(Feature):
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
             embed.set_author(name=self.senderName, url=author_url)
         return embed
+
+class Point(Feature):
+    forecastZone: str
+    def __init__(self, point_feature: dict):
+        super().__init__(point_feature)
+        zone_id = re.search(r"forecast/([A-Z0-9]{6})", self.forecastZone).groups(1)[0]
+        self.zone = client.zones.forecast(zone_id)
 
 class Zone(Feature):
     def __init__(self, zone_feature):
@@ -148,6 +167,9 @@ class GovernmentOrganization:
         else:
             raise TypeError("API returned a non-office object.")
 
+    def __repr__(self):
+        return f"GovernmentOrganization({self.name})"
+
 class ClientAlerts:
     def __init__(self, parent):
         self.parent = parent
@@ -162,17 +184,37 @@ class ClientAlerts:
 class ClientOffice:
     def __init__(self, parent):
         self.parent = parent
+        self.__cache = dict()
 
     def __call__(self, office_id: str = None):
-        if office_id:
-            return GovernmentOrganization(self.parent.get(f"offices/{office_id.upper()}"))
+        if not office_id in self.__cache:
+            self.__cache[office_id] = GovernmentOrganization(self.parent.get(f"offices/{office_id.upper()}"))
+        return self.__cache.get(office_id, None)
+
+class ClientPoints:
+    def __init__(self, parent):
+        self.parent = parent
+
+    def __call__(self, lat: float, lon: float, **params):
+        return Point(self.parent.get(f"points/{lat:.4f},{lon:.4f}"))
 
 class ClientZones:
     def __init__(self, parent):
         self.parent = parent
-    def __call__(self, zone_id: str = None, **params):
-            params["id"] = zone_id
-            return FeatureCollection(self.parent.get(f"zones", params=params))
+        self.cache = dict()
+
+    def __call__(self, *zone_ids) -> FeatureCollection | None:
+        r = FeatureCollection()
+        r.title = "Zone lookup"
+        for zone_id in zone_ids:
+            r.append(self.forecast(zone_id))
+        return r
+
+    def forecast(self, zone_id: str = None) -> Zone:
+        cache_id = zone_id
+        if self.cache.get(cache_id, None) is None:
+            self.cache[cache_id] = self.parent.get(f"zones/forecast/{zone_id}")
+        return Zone(self.cache[cache_id])
 
 class Client:
     """ Basic client for querying weather.gov API."""
@@ -182,6 +224,7 @@ class Client:
         self.get_count = 0
         self.alerts = ClientAlerts(self)
         self.office = ClientOffice(self)
+        self.points = ClientPoints(self)
         self.zones = ClientZones(self)
 
     def get(self, endpoint: str, raw=False, params: dict = None) -> dict:
