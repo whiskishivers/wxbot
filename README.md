@@ -23,6 +23,8 @@ to 1 minute.
 list of affected zones.
 
 ## Commands
+`/wx clear` - Clear alert filter.
+
 `/wx force` - Unpause and immediately check for alerts
 
 `/wx pause` - Toggle suspension of alert checks. The bot will appear idle or online to reflect this state.
@@ -35,20 +37,15 @@ list of affected zones.
 
 `/wx subscribe` - Set the alert channel. Use it in the channel you want alerts in
 
-`/wx set area` - Set the area(s) from which alerts should be posted. See examples below
+`/wx add point` - Add a forecast zone filter using GPS latitude and longitude.
 
-`/wx set point` - Provide a GPS coordinate. Alerts from the matching zone will be posted
+`/wx add zone` - Add a forecast zone filter using a zone identifer. See below.
 
-`/wx set zone` - Set the zone(s) from which alerts should be posted. See examples below
-
-## Area/Zone parameter examples
-Visit the [NWS alerts page](https://alerts.weather.gov/) to look up zone and area identifiers. If you are only
-interested in a very specific geographical location, it is best to use the area or zone that most closely defines it.
-
-The bot filters on one type at a time (area or zone). Multiple areas/zones must be comma separated.
-
-Alerts for the entire state of California: `/wx set area CA`
-
-Alerts for Hawaii coastal and land areas: `/wx set area HI,PH`
+## Examples
+Visit the [NWS alerts page](https://alerts.weather.gov/) to look up zone identifiers. Multiple identifiers can be added
+in one command if they are separated by a comma.
 
 Alerts for the Gulf of Mexico marine zones near Pensacola, FL and Panama City, FL: `/wx set zone GMZ750,GMZ634`
+
+When using `add point`, the GPS coordinates are used to retrieve the zone identifier the point resides in. The accuracy
+needs to be no more than four decimal places (~100 meters).

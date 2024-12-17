@@ -13,12 +13,12 @@ class CustomBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.alert_channel: discord.TextChannel | None = None
-        self.alert_params: dict | None = None
         self.cached_alerts = dict()
         self.check_interval = 5.0
         self.pause_alerts = False
         self.post_count = 0
         self.prune = False
+        self.alert_zones = set()
 
     async def setup_hook(self) -> None:
         # start background task
@@ -31,15 +31,14 @@ class CustomBot(commands.Bot):
     @tasks.loop(minutes=1.0)
     async def check_alerts(self):
         # Skip task if paused, no parameters set, or no alert channel set
-        try:
-            if self.pause_alerts or len(bot.alert_params) == 0 or self.alert_channel is None:
-                return
-        except TypeError:
+        if self.pause_alerts or len(bot.alert_zones) == 0 or self.alert_channel is None:
             return
+
         print(f"Loop: {self.check_alerts.current_loop}. Total API calls: {cli.get_count}.")
 
         # Get active alerts
-        alerts = cli.alerts.active(severity="Moderate,Severe,Extreme,Unknown", status="actual", **self.alert_params)
+        alert_filter = {"zone": [",".join(bot.alert_zones)]}
+        alerts = cli.alerts.active(severity="Moderate,Severe,Extreme,Unknown", status="actual", **alert_filter)
         alerts.sort(key=lambda x:x.onset)
         # Set lower task interval when big bad alerts exist
         if len([i for i in alerts if i.severity == "Extreme" and i.urgency == "Immediate"]) > 0:
@@ -112,35 +111,14 @@ bot = CustomBot(intents=intents, command_prefix=".")
 async def wxgrp(ctx):
     pass
 
-@wxgrp.group(name="set")
-async def wxset(ctx):
+@wxgrp.group(name="add")
+async def wxadd(ctx):
     pass
 
 @commands.guild_only()
-@wxset.command(name="area")
-async def set_area(ctx: commands.Context, area_id: str):
-    """ Set the area(s) from which alerts will be posted """
-    valid_id = re.compile(r"^[0-9a-zA-Z,]+$")
-    area_id = area_id.upper()
-
-    if not valid_id.fullmatch(area_id):
-        await ctx.send("Invalid area ID. Letters, numbers, and commas only.", ephemeral=True)
-        return
-
-    try:
-        cli.alerts.active(area=area_id)
-    except requests.exceptions.HTTPError as e:
-        await ctx.send(f"weather.gov api returned {e.response.status_code} {e.response.reason}. Cannot set area",
-                       ephemeral=True)
-        return
-    bot.alert_params = {"area": area_id}
-    print(f"Params set: {bot.alert_params}")
-    await ctx.send("✅ Area set!", ephemeral=True)
-
-@commands.guild_only()
-@wxset.command(name="point")
-async def set_point(ctx: commands.Context, latitude: float, longitude: float):
-    """ Set the GPS coordinates from which alerts will be posted """
+@wxadd.command(name="point")
+async def add_point(ctx: commands.Context, latitude: float, longitude: float):
+    """ Add a forecast zone filter using GPS latitude and longitude """
     latitude = float(latitude)
     longitude = float(longitude)
     try:
@@ -148,15 +126,14 @@ async def set_point(ctx: commands.Context, latitude: float, longitude: float):
     except requests.exceptions.HTTPError as e:
         await ctx.send(f"API failed when looking up geo point. {e.response.status_code}", ephemeral=True)
         return
-
-    bot.alert_params = {"zone": point.zone.id}
-    print(f"Params set: {bot.alert_params}")
-    await ctx.send(f"✅ Zone set: {point.zone.id}: {point.zone.name}", ephemeral=True)
+    bot.alert_zones.add(point.forecastZone.id)
+    print(f"Params set: {bot.alert_zones}")
+    await ctx.send(f"✅ Zone set: {point.forecastZone.id}: [{point.forecastZone.name}](https://forecast.weather.gov/MapClick.php?zoneid={point.forecastZone.id})", ephemeral=True)
 
 @commands.guild_only()
-@wxset.command(name="zone")
-async def set_zone(ctx: commands.Context, zone_id: str):
-    """ Set the zone(s) from which alerts will be posted """
+@wxadd.command(name="zone")
+async def add_zone(ctx: commands.Context, zone_id: str):
+    """ Add a forecast zone filter using a zone identifier """
     valid_id = re.compile(r"^[0-9a-zA-Z,]+$")
     zone_id = zone_id.upper()
 
@@ -165,8 +142,7 @@ async def set_zone(ctx: commands.Context, zone_id: str):
         await ctx.send("Invalid zone ID. Letters, numbers, and commas only.", ephemeral=True)
         return
 
-    split_ids = zone_id.split(",")
-    split_ids = [i.strip() for i in split_ids]
+    split_ids = [i.strip() for i in zone_id.split(",")]
 
     # Bad syntax if the api fails
     try:
@@ -176,9 +152,19 @@ async def set_zone(ctx: commands.Context, zone_id: str):
                        ephemeral=True)
         return
 
-    bot.alert_params = {"zone": ",".join(i.id for i in zones)}
-    print(f"Params set: {bot.alert_params}")
-    await ctx.send(f"✅ Zone set:\n {"\n".join(i.name for i in zones)}", ephemeral=True)
+    bot.alert_zones.update(split_ids)
+    print(f"Params set: {bot.alert_zones}")
+    zone_list = []
+    for i in zones:
+        zone_list.append(f"[{i.name}](https://forecast.weather.gov/MapClick.php?zoneid={i.id})")
+    await ctx.send(f"✅ Zone set:\n{"\n".join(zone_list)}", ephemeral=True)
+
+@commands.guild_only()
+@wxgrp.command(name="clear")
+async def clear(ctx: commands.Context):
+    """ Delete all zone filters """
+    bot.alert_zones.clear()
+    await ctx.send("Alert filters cleared.", ephemeral=True)
 
 @commands.guild_only()
 @wxgrp.command(name="force")
@@ -188,6 +174,7 @@ async def force(ctx: commands.Context):
     bot.check_alerts.stop()
     bot.check_alerts.restart()
     await bot.change_presence(status=discord.Status.online)
+    print("Alert check forced.")
     await ctx.send("✅ Alert check forced.", ephemeral=True)
 
 @commands.guild_only()
@@ -254,10 +241,10 @@ async def wx_status(ctx: commands.Context):
     """ Display parameters and API stats """
     content = ""
 
-    if None in (bot.alert_params, bot.alert_channel):
-        content += "⚠️ ** Incomplete setup!** ⚠️\n"
-        if bot.alert_params is None:
-            content += "**Set alert filters.** Use `/wx set area (area_id)` or `/wx set zone (zone_id)`.\n"
+    if bot.alert_channel is None or len(bot.alert_zones) == 0:
+        content += "⚠️ ** Setup is not complete!** ⚠️\n"
+        if len(bot.alert_zones) == 0:
+            content += "**Set alert filters** using `/wx add point` or `/wx add zone`.\n"
 
         if bot.alert_channel is None:
             content += "**Set alert channel.** Use `/wx subscribe` in the alert channel.\n\n"
@@ -266,7 +253,9 @@ async def wx_status(ctx: commands.Context):
                    f"**{bot.post_count}** have been posted.\n"
 
     content += f"Checking alerts every **{bot.check_alerts.minutes}** minutes.\n" \
-               f"Filter parameters: `{bot.alert_params}`\n"
+               f"NWS API has been called **{cli.get_count}** times.\n" \
+               f"Filter parameters: `{bot.alert_zones}`\n"
+
     if bot.pause_alerts:
         content += "Alert checks are **paused**. "
     else:
@@ -275,8 +264,6 @@ async def wx_status(ctx: commands.Context):
         content += "Expired alerts will be **deleted**.\n"
     else:
         content += "Expired alerts will be **edited**.\n"
-
-    content += f"NWS API has been called **{cli.get_count}** times."
 
     await ctx.send(content, ephemeral=True)
 
