@@ -6,7 +6,7 @@ from discord.ext import commands, tasks
 import os
 import re
 import requests
-import wx
+import wapi
 
 
 class CustomBot(commands.Bot):
@@ -54,7 +54,7 @@ class CustomBot(commands.Bot):
         for i in expired_ids:
             if self.pause_alerts:
                 break
-            expired_alert: wx.Alert = self.cached_alerts[i]
+            expired_alert: wapi.Alert = self.cached_alerts[i]
 
             # Pruning enabled - delete entire message
             if self.prune:
@@ -107,7 +107,7 @@ intents = discord.Intents.default()
 
 bot = CustomBot(intents=intents, command_prefix=".")
 
-@bot.hybrid_group(name="wx")
+@bot.hybrid_group(name="w")
 async def wxgrp(ctx):
     pass
 
@@ -126,9 +126,9 @@ async def add_point(ctx: commands.Context, latitude: float, longitude: float):
     except requests.exceptions.HTTPError as e:
         await ctx.send(f"API failed when looking up geo point. {e.response.status_code}", ephemeral=True)
         return
-    bot.alert_zones.add(point.forecastZone.id)
+    bot.alert_zones.add(point.zone.id)
     print(f"Params set: {bot.alert_zones}")
-    await ctx.send(f"✅ Zone set: {point.forecastZone.id}: [{point.forecastZone.name}](https://forecast.weather.gov/MapClick.php?zoneid={point.forecastZone.id})", ephemeral=True)
+    await ctx.send(f"✅ Zone set: {point.zone.id}: [{point.zone.name}](https://forecast.weather.gov/MapClick.php?zoneid={point.zone.id})", ephemeral=True)
 
 @commands.guild_only()
 @wxadd.command(name="zone")
@@ -137,7 +137,6 @@ async def add_zone(ctx: commands.Context, zone_id: str):
     valid_id = re.compile(r"^[0-9a-zA-Z,]+$")
     zone_id = zone_id.upper()
 
-    # validate characters
     if not valid_id.fullmatch(zone_id):
         await ctx.send("Invalid zone ID. Letters, numbers, and commas only.", ephemeral=True)
         return
@@ -230,14 +229,14 @@ async def subscribe(ctx: commands.Context):
     try:
         test_post = await ctx.channel.send("Weather alerts will be posted here.")
         await test_post.delete()
-        await ctx.send(f"✅ Alerts will be posted to {ctx.channel.mention}", ephemeral=True)
+        await ctx.send(f"✅ Alerts will be posted in {ctx.channel.mention}", ephemeral=True)
         bot.alert_channel = ctx.channel
     except discord.errors.Forbidden:
         await ctx.send(f"Error! The bot is not allowed to post here. Check bot permissions.", ephemeral=True)
 
 @commands.guild_only()
 @wxgrp.command(name="status")
-async def wx_status(ctx: commands.Context):
+async def status(ctx: commands.Context):
     """ Display parameters and API stats """
     content = ""
 
@@ -269,5 +268,5 @@ async def wx_status(ctx: commands.Context):
 
 
 if __name__ == '__main__':
-    cli = wx.client
+    cli = wapi.client
     bot.run(os.environ["TOKEN"])
