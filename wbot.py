@@ -8,6 +8,7 @@ import re
 import requests
 import wapi
 
+cli = wapi.client
 
 class CustomBot(commands.Bot):
     def __init__(self, *args, **kwargs):
@@ -18,7 +19,6 @@ class CustomBot(commands.Bot):
         self.pause_alerts = False
         self.post_count = 0
         self.prune = False
-        self.alert_zones = set()
 
     async def setup_hook(self) -> None:
         # start background task
@@ -31,15 +31,16 @@ class CustomBot(commands.Bot):
     @tasks.loop(minutes=1.0)
     async def check_alerts(self):
         # Skip task if paused, no parameters set, or no alert channel set
-        if self.pause_alerts or len(bot.alert_zones) == 0 or self.alert_channel is None:
+        if self.pause_alerts or len(cli.alert_zones) == 0 or self.alert_channel is None:
             return
 
         print(f"Loop: {self.check_alerts.current_loop}. Total API calls: {cli.get_count}.")
 
         # Get active alerts
-        alert_filter = {"zone": [",".join(bot.alert_zones)]}
+        alert_filter = {"zone": [",".join(cli.alert_zones)]}
         alerts = cli.alerts.active(severity="Moderate,Severe,Extreme,Unknown", status="actual", **alert_filter)
-        alerts.sort(key=lambda x:x.onset)
+        alerts.sort(key=lambda x:x.sent)
+
         # Set lower task interval when big bad alerts exist
         if len([i for i in alerts if i.severity == "Extreme" and i.urgency == "Immediate"]) > 0:
             self.check_interval = 1.0
@@ -122,13 +123,13 @@ async def add_point(ctx: commands.Context, latitude: float, longitude: float):
     latitude = float(latitude)
     longitude = float(longitude)
     try:
-        point = cli.points(latitude, longitude)
+        zone = cli.points(latitude, longitude).zone
     except requests.exceptions.HTTPError as e:
         await ctx.send(f"API failed when looking up geo point. {e.response.status_code}", ephemeral=True)
         return
-    bot.alert_zones.add(point.zone.id)
-    print(f"Params set: {bot.alert_zones}")
-    await ctx.send(f"✅ Zone set: {point.zone.id}: [{point.zone.name}](https://forecast.weather.gov/MapClick.php?zoneid={point.zone.id})", ephemeral=True)
+    cli.alert_zones.add(zone.id)
+    print(f"Params set: {cli.alert_zones}")
+    await ctx.send(f"✅ Zone set: {zone.id}: [{zone.name}](https://forecast.weather.gov/MapClick.php?zoneid={zone.id})", ephemeral=True)
 
 @commands.guild_only()
 @wxadd.command(name="zone")
@@ -151,8 +152,8 @@ async def add_zone(ctx: commands.Context, zone_id: str):
                        ephemeral=True)
         return
 
-    bot.alert_zones.update(split_ids)
-    print(f"Params set: {bot.alert_zones}")
+    cli.alert_zones.update(split_ids)
+    print(f"Params set: {cli.alert_zones}")
     zone_list = []
     for i in zones:
         zone_list.append(f"[{i.name}](https://forecast.weather.gov/MapClick.php?zoneid={i.id})")
@@ -162,7 +163,7 @@ async def add_zone(ctx: commands.Context, zone_id: str):
 @wxgrp.command(name="clear")
 async def clear(ctx: commands.Context):
     """ Delete all zone filters """
-    bot.alert_zones.clear()
+    cli.alert_zones.clear()
     await ctx.send("Alert filters cleared.", ephemeral=True)
 
 @commands.guild_only()
@@ -240,20 +241,20 @@ async def status(ctx: commands.Context):
     """ Display parameters and API stats """
     content = ""
 
-    if bot.alert_channel is None or len(bot.alert_zones) == 0:
+    if bot.alert_channel is None or len(cli.alert_zones) == 0:
         content += "⚠️ ** Setup is not complete!** ⚠️\n"
-        if len(bot.alert_zones) == 0:
-            content += "**Set alert filters** using `/wx add point` or `/wx add zone`.\n"
+        if len(cli.alert_zones) == 0:
+            content += "**Set alert filters** using `/w add point` or `/w add zone`.\n"
 
         if bot.alert_channel is None:
-            content += "**Set alert channel.** Use `/wx subscribe` in the alert channel.\n\n"
+            content += "**Set alert channel.** Use `/w subscribe` in the alert channel.\n\n"
     else:
         content += f"Alerts are posted in {bot.alert_channel.mention}. **{len(bot.cached_alerts)}** are currently active. " \
                    f"**{bot.post_count}** have been posted.\n"
 
     content += f"Checking alerts every **{bot.check_alerts.minutes}** minutes.\n" \
                f"NWS API has been called **{cli.get_count}** times.\n" \
-               f"Filter parameters: `{bot.alert_zones}`\n"
+               f"Filter parameters: `{cli.alert_zones}`\n"
 
     if bot.pause_alerts:
         content += "Alert checks are **paused**. "
@@ -268,5 +269,4 @@ async def status(ctx: commands.Context):
 
 
 if __name__ == '__main__':
-    cli = wapi.client
     bot.run(os.environ["TOKEN"])
