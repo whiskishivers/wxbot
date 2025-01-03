@@ -40,21 +40,21 @@ class Feature:
 
 class Alert(Feature):
     affectedZones: list
-    areaDesc: str = ""
     description: str = ""
-    discord_msg: discord.Message | None = None
-    effective: dt.datetime | None = None
+    discord_msg: discord.Message = None
+    effective: dt.datetime = None
     ends: dt.datetime = None
     event: str = ""
-    expires: dt.datetime | None = None
+    expires: dt.datetime = None
     instruction: str = ""
     parameters: dict = dict()
     senderName: str = ""
-    sent: dt.datetime | None = None
-    onset: dt.datetime | None = None
+    sent: dt.datetime = None
+    onset: dt.datetime = None
     severity: str = ""
     urgency: str = ""
     wmo: str | None
+    zones: FeatureCollection
     _alert_colors = {("Severe", "Expected"): discord.Color.dark_gold(),
                      ("Severe", "Future"): discord.Color.dark_gold(),
                      ("Severe", "Immediate"): discord.Color.gold(),
@@ -78,10 +78,8 @@ class Alert(Feature):
         if self.instruction is not None:
             self.instruction = re.sub(r'(?<!\n)\n(?!\n)', ' ', self.instruction)
 
-        # Cache affected zones
-        for i in self.affectedZones.copy():
-            self.affectedZones.remove(i)
-            self.affectedZones.append(client.zones.raw(i))
+        # Store affected zones
+        self.zones = client.zones(*self.geocode["UGC"])
 
         # Change required date strings to datetime objects
         for i in ("sent", "effective", "onset", "expires", "ends"):
@@ -100,20 +98,22 @@ class Alert(Feature):
         description = ""
         if self.severity == "Extreme" or self.urgency == "Immediate":
             description += self.description[:4096]
-        # Use short headline and area list for non-urgent alerts
+
+        # Use short headline and zone list for non-urgent alerts
         elif self.nws_headline:
             description += f"{"\n".join(self.nws_headline)}\n\n"
-            areas = self.areaDesc.split(";")
-            areas = [i.strip() for i in areas]
-            areas.sort()
-            description += "\n".join(areas)
+            zone_list = []
+            for zone in self.zones:
+                if zone.id in client.alert_zones:
+                    zone_list.append(f"[{zone.name}](https://forecast.weather.gov/MapClick.php?zoneid={zone.id})")
+            zone_list.sort()
+            description += "\n".join(zone_list)
 
         embed = discord.Embed(color=color,
                               title=self.event,
                               url=f"https://alerts.weather.gov/search?id={self.id}",
                               description=description,
                               timestamp=self.onset)
-
         if self.instruction:
             instruction = self.instruction[:1024]
             embed.add_field(name="Instructions", value=instruction, inline=False)
@@ -186,16 +186,15 @@ class ClientZones:
         self.parent = parent
         self._cache = dict()
 
-    def __call__(self, *zone_ids) -> FeatureCollection | None:
-        r = FeatureCollection()
-        r.title = "Zone lookup"
-        [r.append(self.forecast(i)) for i in zone_ids]
-        return r
-
-    def forecast(self, zone_id: str = None) -> Zone:
-        if self._cache.get(zone_id, None) is None:
-            self._cache[zone_id] = self.parent.get(f"zones/forecast/{zone_id}")
-        return Zone(self._cache[zone_id])
+    def __call__(self, *zone_ids) -> [Zone]:
+        """ Return list of forecast zone objects. Query API for non-cached zones. """
+        param_ids = [i for i in zone_ids if i not in self._cache.keys()]
+        if len(param_ids) > 0:
+            params = {"id": ",".join(param_ids)}
+            new_zones = FeatureCollection(client.get("zones/forecast", params=params))
+            for i in new_zones:
+                self._cache[i.id] = i
+        return [self._cache[i] for i in zone_ids]
 
     def raw(self, zone_url: str) -> Zone:
         if self._cache.get(zone_url, None) is None:
@@ -210,6 +209,7 @@ class Client:
     def __init__(self, track_stats=True):
         self.headers = {"User-Agent": "python-requests | Discord weather bot"}
         self.session = requests.Session()
+        self.alert_zones = set()
         self.get_count = 0
         self.alerts = ClientAlerts(self)
         self.points = ClientPoints(self)
