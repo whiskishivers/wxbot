@@ -113,12 +113,15 @@ class Alert(Feature):
                               title=self.event,
                               url=f"https://alerts.weather.gov/search?id={self.id}",
                               description=description,
-                              timestamp=self.onset)
+                              timestamp=self.sent)
         if self.instruction:
             instruction = self.instruction[:1024]
             embed.add_field(name="Instructions", value=instruction, inline=False)
-        embed.add_field(name="Severity", value=f"{self.severity}")
-        embed.add_field(name="Urgency", value=self.urgency)
+        embed.add_field(name="Severity", value=f"{self.severity} - {self.urgency}")
+        if self.onset is not None:
+            embed.add_field(name="Onset", value = f"<t:{int(self.onset.timestamp())}:R>")
+        if self.ends is not None:
+            embed.add_field(name="Ends", value = f"<t:{int(self.ends.timestamp())}:R>")
 
         if self.wmo:
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
@@ -138,24 +141,18 @@ class Alert(Feature):
 
 
 class Zone(Feature):
-    def __init__(self, zone_feature):
-        super().__init__(zone_feature)
-
     def __repr__(self):
         return f"Zone({self.id})"
 
-    def active_alerts(self):
-        return client.alerts.active(zone=self.id)
-
 
 class Point(Feature):
-    zone: Zone
+    forecast_zone: Zone
     gridX: float
     gridY: float
 
     def __init__(self, point_feature: dict):
         super().__init__(point_feature)
-        self.zone = client.zones.raw(self.forecastZone)
+        self.forecast_zone = client.zones.raw(self.forecastZone)
 
     def __repr__(self):
         return f"Point({self.gridX},{self.gridY})"
@@ -187,7 +184,7 @@ class ClientZones:
         self._cache = dict()
 
     def __call__(self, *zone_ids) -> [Zone]:
-        """ Return list of forecast zone objects. Query API for non-cached zones. """
+        """ Return list of zone objects. Query API for non-cached zones. """
         param_ids = [i for i in zone_ids if i not in self._cache.keys()]
         if len(param_ids) > 0:
             params = {"id": ",".join(param_ids)}
@@ -206,7 +203,8 @@ class ClientZones:
 class Client:
     """ Basic client for querying weather.gov API."""
 
-    def __init__(self, track_stats=True):
+    def __init__(self):
+        self.start_time = dt.datetime.now()
         self.headers = {"User-Agent": "python-requests | Discord weather bot"}
         self.session = requests.Session()
         self.alert_zones = set()

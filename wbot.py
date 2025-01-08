@@ -30,7 +30,8 @@ class CustomBot(commands.Bot):
 
     @tasks.loop(minutes=1.0)
     async def check_alerts(self):
-        # Skip task if paused, no parameters set, or no alert channel set
+        """ Loop for managing all alert messages """
+        # Skip task if paused, no filter exists, or no alert channel set
         if self.pause_alerts or len(cli.alert_zones) == 0 or self.alert_channel is None:
             return
 
@@ -41,7 +42,7 @@ class CustomBot(commands.Bot):
         alerts = cli.alerts.active(severity="Moderate,Severe,Extreme,Unknown", status="actual", **alert_filter)
         alerts.sort(key=lambda x:x.sent)
 
-        # Set lower task interval when big bad alerts exist
+        # Change task interval based on severity and urgency
         if len([i for i in alerts if i.severity == "Extreme" and i.urgency == "Immediate"]) > 0:
             self.check_interval = 1.0
         else:
@@ -91,13 +92,12 @@ class CustomBot(commands.Bot):
                 try:
                     async with self.alert_channel.typing():
                         await asyncio.sleep(0.5)
-                        alert.discord_msg = await self.alert_channel.send(content=f"**{alert.headline}**",
-                                                                          embed=alert.embed)
+                        alert.discord_msg = await self.alert_channel.send(content=f"**{alert.headline}**",                                                  embed=alert.embed)
                     self.cached_alerts[alert.id] = alert
                     self.post_count += 1
                     print(f"Posted: {alert.event}")
                 except discord.errors.Forbidden:
-                    print(f"ERROR: Permission error while posting alert {alert.id}")
+                    print(f"ERROR: Forbidden error while posting alert {alert.id}")
                     break
                 except discord.errors.NotFound:
                     print(f"ERROR: Not Found error while posting alert {alert.id}")
@@ -123,7 +123,7 @@ async def add_point(ctx: commands.Context, latitude: float, longitude: float):
     latitude = float(latitude)
     longitude = float(longitude)
     try:
-        zone = cli.points(latitude, longitude).zone
+        zone = cli.points(latitude, longitude).forecast_zone
     except requests.exceptions.HTTPError as e:
         await ctx.send(f"API failed when looking up geo point. {e.response.status_code}", ephemeral=True)
         return
@@ -252,18 +252,20 @@ async def status(ctx: commands.Context):
         content += f"Alerts are posted in {bot.alert_channel.mention}. **{len(bot.cached_alerts)}** are currently active. " \
                    f"**{bot.post_count}** have been posted.\n"
 
-    content += f"Checking alerts every **{bot.check_alerts.minutes}** minutes.\n" \
-               f"NWS API has been called **{cli.get_count}** times.\n" \
-               f"Filter parameters: `{cli.alert_zones}`\n"
+    content += f"Alert check interval: **{bot.check_alerts.minutes}** minutes.\n" \
+               f"NWS API calls: **{cli.get_count}**\n" \
+               f"Filter parameters: `{",".join(cli.alert_zones)}`\n"
 
     if bot.pause_alerts:
         content += "Alert checks are **paused**. "
     else:
-        content += "Alert checks are **not paused**. "
+        content += "Alert checks are **running**. "
     if bot.prune:
         content += "Expired alerts will be **deleted**.\n"
     else:
         content += "Expired alerts will be **edited**.\n"
+
+    content += f"Started: <t:{int(cli.start_time.timestamp())}:R>.\n"
 
     await ctx.send(content, ephemeral=True)
 
