@@ -43,8 +43,8 @@ your discord server.
 `/w add zone` Add a forecast zone using a zone identifier. See below.
 
 ## Examples
-Visit the [NWS alerts page](https://alerts.weather.gov/) to look up zone IDs. Multiple identifiers can be added
-in one command if they are separated by a comma.
+Visit the [NWS alerts page](https://alerts.weather.gov/) to look up zone IDs. The bot currently supports forecast zones
+only. Multiple identifiers can be added in one command if they are separated by a comma.
 
 ### Zone IDs
 Alerts for Pensacola, Pensacola Bay and adjacent ocean zones in the Gulf: `/w add zone GMZ634,FLZ202,GMZ655,GMZ650`
