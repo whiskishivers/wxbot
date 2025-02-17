@@ -6,10 +6,14 @@ import re
 
 class FeatureCollection(list):
     """ Default object from API """
+    updated: dt.datetime
 
     def __init__(self, fcoll=dict()):
         super().__init__()
         self.title = fcoll.get("title", None)
+        updated = fcoll.get("updated", None)
+        if updated:
+            self.updated = dt.datetime.fromisoformat(updated)
         if len(fcoll) == 0:
             return
         for feature in fcoll["features"]:
@@ -105,7 +109,10 @@ class Alert(Feature):
             zone_list = []
             for zone in self.zones:
                 if zone.id in client.alert_zones:
-                    zone_list.append(f"[{zone.name}](https://forecast.weather.gov/MapClick.php?zoneid={zone.id})")
+                    state = ""
+                    if zone.state is not None:
+                        state = f" {zone.state}"
+                    zone_list.append(f"[{zone.name}{state}](https://forecast.weather.gov/MapClick.php?zoneid={zone.id})")
             zone_list.sort()
             description += "\n".join(zone_list)
 
@@ -209,6 +216,7 @@ class Client:
         self.session = requests.Session()
         self.alert_zones = set()
         self.get_count = 0
+        self.get_last = None
         self.alerts = ClientAlerts(self)
         self.points = ClientPoints(self)
         self.zones = ClientZones(self)
@@ -222,7 +230,8 @@ class Client:
             url = endpoint
         with self.session.get(url=url, headers=self.headers, params=params, timeout=5) as resp:
             self.get_count += 1
-            print(f"API GET: {resp.status_code} {resp.url}")
+            self.get_last = dt.datetime.now()
+            print(f"NWS API: {resp.status_code} {resp.reason} {resp.url}")
             resp.raise_for_status()  # api error
             return resp.json()
 

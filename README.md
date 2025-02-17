@@ -8,12 +8,13 @@ your discord server.
   * discord.py
 
 ## Features
-- Updates alert channel every 5 minutes, or every minute during extreme weather.
-- Posts alerts with moderate, severe, extreme, or unknown severity.
+- Updates your specified alert channel every 5 minutes, or every minute during extreme weather.
+- Posts all active alerts including test messages.
   - Alerts of immediate urgency contain the full description.
   - Other alerts contain a summary headline and a list of affected zones in your filter.
-- Alerts can be filtered using zone identifiers or GPS coordinates.
-- Expired alert messages are automatically handled.
+  - Severe alerts are colored yellow. Extreme alerts are colored red.
+- Alerts can be filtered using forecast zone IDs or GPS coordinates.
+- Expired or canceled alert messages are automatically handled.
 
 ## Setup
 1. Make a `TOKEN` environment variable that contains your discord API token.
@@ -36,7 +37,7 @@ your discord server.
 
 `/w status` Display counters and current filter
 
-`/w subscribe` Set the alert channel. Use it in the channel you want alerts in
+`/w subscribe` Set alert channel by running this command in it
 
 `/w add point` Add a forecast zone using GPS latitude and longitude.
 
@@ -51,3 +52,5 @@ Alerts for Pensacola, Pensacola Bay and adjacent ocean zones in the Gulf: `/w ad
 
 ### GPS coordinate
 Alerts for Manhattan, NY: `/w add point 40.6892 -74.0445`
+
+GPS points are not stored or displayed after the zone in which they reside in are determined.
