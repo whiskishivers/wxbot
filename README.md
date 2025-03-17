@@ -4,7 +4,6 @@ your discord server.
 
 ## Requirements
 * Third party Python modules:
-  * requests
   * discord.py
 
 ## Features

@@ -1,14 +1,12 @@
 #!/usr/bin/python3
 
+import aiohttp
 import asyncio
 import discord
 from discord.ext import commands, tasks
 import os
 import re
-import requests
 import wapi
-
-nws = wapi.client
 
 class CustomBot(commands.Bot):
     def __init__(self, *args, **kwargs):
@@ -19,12 +17,14 @@ class CustomBot(commands.Bot):
         self.pause_alerts = False
         self.post_count = 0
         self.prune = False
+        self.api_client = wapi.client
 
     async def setup_hook(self) -> None:
         # start background task
         self.check_alerts.start()
 
     async def on_ready(self):
+        await self.api_client.initialize_session()
         await self.tree.sync()
         print("Bot ready")
 
@@ -32,15 +32,14 @@ class CustomBot(commands.Bot):
     async def check_alerts(self):
         """ Loop for managing all alert messages """
         # Skip task if paused, no filter exists, or no alert channel set
-        if self.pause_alerts or len(nws.alert_zones) == 0 or self.alert_channel is None:
+        if self.pause_alerts or len(self.api_client.alert_zones) == 0 or self.alert_channel is None:
             return
 
-        print(f"Loop: {self.check_alerts.current_loop}. Total API calls: {nws.get_count}.")
+        print(f"Loop: {self.check_alerts.current_loop}. Total API calls: {self.api_client.get_count}.")
 
         # Get active alerts
-        alert_filter = {"zone": [",".join(nws.alert_zones)]}
-        # alerts = nws.alerts.active(severity="Moderate,Severe,Extreme,Unknown", status="actual", **alert_filter)
-        alerts = nws.alerts.active(**alert_filter)
+        alert_filter = {"zone": ",".join(self.api_client.alert_zones)}
+        alerts = await self.api_client.alerts.active(**alert_filter)
         alerts.sort(key=lambda x:x.sent)
 
         # Change task interval based on severity and urgency
@@ -57,7 +56,7 @@ class CustomBot(commands.Bot):
         for i in expired_ids:
             if self.pause_alerts:
                 break
-            expired_alert: wapi.Alert = self.cached_alerts[i]
+            expired_alert = self.cached_alerts[i]
 
             # Pruning enabled - delete entire message
             if self.prune:
@@ -72,8 +71,7 @@ class CustomBot(commands.Bot):
             else:
                 content = f"Inactive: {expired_alert.event}"
                 try:
-                    await expired_alert.discord_msg.edit(content=content,
-                                                         embed=expired_alert.embed_inactive)
+                    await expired_alert.discord_msg.edit(content=content, embed=expired_alert.embed_inactive)
                     print(f"Edited: {expired_alert.event}")
                 except discord.errors.NotFound as e:
                     print(f"ERROR: Could not edit alert. Code {e.code} {e.text}")
@@ -119,17 +117,14 @@ async def wxadd(ctx):
 @commands.guild_only()
 @wxadd.command(name="point")
 async def add_point(ctx: commands.Context, latitude: float, longitude: float):
-    """ Add a forecast zone filter using GPS latitude and longitude """
-    latitude = float(latitude)
-    longitude = float(longitude)
+    """ Add a forecast zone filter using GPS coordinates """
     try:
-        zone = nws.points(latitude, longitude).forecast_zone
-    except requests.exceptions.HTTPError as e:
-        await ctx.send(f"API failed when looking up geo point. {e.response.status_code}", ephemeral=True)
-        return
-    nws.alert_zones.add(zone.id)
-    print(f"Params set: {nws.alert_zones}")
-    await ctx.send(f"✅ Zone set: {zone.id}: [{zone.name}](https://forecast.weather.gov/MapClick.php?zoneid={zone.id})", ephemeral=True)
+        zone = await bot.api_client.points(latitude, longitude)
+        bot.api_client.alert_zones.update([zone.id])
+        await ctx.send(f"Zone added: {zone.id}", ephemeral=True)
+    except Exception as e:
+        await ctx.send(f"Error adding zone from point. {e}", ephemeral=True)
+    return
 
 @commands.guild_only()
 @wxadd.command(name="zone")
@@ -144,16 +139,14 @@ async def add_zone(ctx: commands.Context, zone_id: str):
 
     split_ids = [i.strip() for i in zone_id.split(",")]
 
-    # Bad syntax if the api fails
     try:
-        zones = nws.zones(*split_ids)
-    except requests.exceptions.HTTPError as e:
-        await ctx.send(f"weather.gov api returned {e.response.status_code} {e.response.reason}. Cannot set zone.",
-                       ephemeral=True)
+        zones = await bot.api_client.zones(*split_ids)
+    except aiohttp.ClientError as e:
+        await ctx.send(f"Couldn't add zone. {e}", ephemeral=True)
         return
 
-    nws.alert_zones.update(split_ids)
-    print(f"Params set: {nws.alert_zones}")
+    bot.api_client.alert_zones.update(split_ids)
+    print(f"Zones added: {bot.api_client.alert_zones}")
     zone_list = []
     for i in zones:
         zone_list.append(f"[{i.name}](https://forecast.weather.gov/MapClick.php?zoneid={i.id})")
@@ -163,7 +156,7 @@ async def add_zone(ctx: commands.Context, zone_id: str):
 @wxgrp.command(name="clear")
 async def clear(ctx: commands.Context):
     """ Delete all zone filters """
-    nws.alert_zones.clear()
+    bot.api_client.alert_zones.clear()
     await ctx.send("Alert filters cleared.", ephemeral=True)
 
 @commands.guild_only()
@@ -240,38 +233,27 @@ async def subscribe(ctx: commands.Context):
 async def status(ctx: commands.Context):
     """ Display parameters and API stats """
     content = ""
-
-    if bot.alert_channel is None or len(nws.alert_zones) == 0:
+    if bot.alert_channel is None or len(bot.api_client.alert_zones) == 0:
         content += "⚠️ ** Setup is not complete!** ⚠️\n"
-        if len(nws.alert_zones) == 0:
+        if len(bot.api_client.alert_zones) == 0:
             content += "**Set alert filters** using `/w add point` or `/w add zone`.\n"
-
         if bot.alert_channel is None:
             content += "**Set alert channel.** Use `/w subscribe` in the alert channel.\n\n"
     else:
         content += f"Alerts are posted in {bot.alert_channel.mention}. **{len(bot.cached_alerts)}** are currently active. " \
                    f"**{bot.post_count}** have been posted.\n"
-
     content += f"Alert check interval: **{bot.check_alerts.minutes}** minutes.\n" \
-               f"NWS API calls: **{nws.get_count}**\n" \
-               f"Filter parameters: `{",".join(nws.alert_zones)}`\n"
-
-    if nws.get_last is not None:
-        content += f"Last API call: <t:{int(nws.get_last.timestamp())}:R>\n"
-
-    if bot.pause_alerts:
-        content += "Alert checks are **paused**. "
-    else:
-        content += "Alert checks are **running**. "
-    if bot.prune:
-        content += "Expired alerts will be **deleted**.\n"
-    else:
-        content += "Expired alerts will be **edited**.\n"
-
-    content += f"Started: <t:{int(nws.start_time.timestamp())}:R>.\n"
+               f"NWS API calls: **{bot.api_client.get_count}**\n" \
+               f"Last API call: {f"<t:{int(bot.api_client.get_last.timestamp()):}:R>" if bot.api_client.get_last else "Never"}\n" \
+               f"Filter parameters: `{",".join(bot.api_client.alert_zones)}`\n" \
+               f"Alert checks are {"**paused**" if bot.pause_alerts else "**running**"}.\n" \
+               f"Expired alerts will be {"**deleted**" if bot.prune else "**edited**"}.\n" \
+               f"Started: <t:{int(bot.api_client.start_time.timestamp())}:R>.\n"
 
     await ctx.send(content, ephemeral=True)
 
-
 if __name__ == '__main__':
-    bot.run(os.environ["TOKEN"])
+    if os.environ.get("TOKEN"):
+        bot.run(os.environ["TOKEN"])
+    else:
+        print("Discord TOKEN environment var not set.")

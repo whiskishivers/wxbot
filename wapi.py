@@ -1,6 +1,6 @@
+import aiohttp
 import datetime as dt
 import discord
-import requests
 import re
 
 
@@ -21,7 +21,7 @@ class FeatureCollection(list):
                 case "wx:Alert":
                     self.append(Alert(feature))
                 case "wx:Point":
-                    self.append(Point(feature))
+                    continue #self.append(Point(feature))
                 case "wx:Zone":
                     self.append(Zone(feature))
                 case _:
@@ -44,6 +44,7 @@ class Feature:
 
 class Alert(Feature):
     affectedZones: list
+    areaDesc: str = ""
     description: str = ""
     discord_msg: discord.Message = None
     effective: dt.datetime = None
@@ -81,10 +82,6 @@ class Alert(Feature):
             self.description = re.sub(r'(?<!\n)\n(?!\n)', ' ', self.description)
         if self.instruction is not None:
             self.instruction = re.sub(r'(?<!\n)\n(?!\n)', ' ', self.instruction)
-
-        # Store affected zones
-        self.zones = client.zones(*self.geocode["UGC"])
-
         # Change required date strings to datetime objects
         for i in ("sent", "effective", "onset", "expires", "ends"):
             try:
@@ -97,7 +94,7 @@ class Alert(Feature):
 
     @property
     def embed(self) -> discord.Embed:
-        """ Chat embed """
+        """ Discord message embed """
         color = self._alert_colors.get((self.severity, self.urgency), None)
         description = ""
         if self.severity == "Extreme" or self.urgency == "Immediate":
@@ -106,15 +103,7 @@ class Alert(Feature):
         # Use short headline and zone list for non-urgent alerts
         elif self.nws_headline:
             description += f"{"\n".join(self.nws_headline)}\n\n"
-            zone_list = []
-            for zone in self.zones:
-                if zone.id in client.alert_zones:
-                    state = ""
-                    if zone.state is not None:
-                        state = f" {zone.state}"
-                    zone_list.append(f"[{zone.name}{state}](https://forecast.weather.gov/MapClick.php?zoneid={zone.id})")
-            zone_list.sort()
-            description += "\n".join(zone_list)
+            description += self.areaDesc
 
         embed = discord.Embed(color=color,
                               title=self.event,
@@ -129,16 +118,14 @@ class Alert(Feature):
             embed.add_field(name="Onset", value = f"<t:{int(self.onset.timestamp())}:R>")
         if self.ends is not None:
             embed.add_field(name="Ends", value = f"<t:{int(self.ends.timestamp())}:R>")
-
         if self.wmo:
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
             embed.set_author(name=self.senderName, url=author_url)
-
         return embed
 
     @property
     def embed_inactive(self) -> discord.Embed:
-        """ Embed for editing inactive chat messages """
+        """ Discord message embed for inactive alerts """
         embed = discord.Embed(title=self.event, url=f"https://alerts.weather.gov/search?id={self.id}",
                               description="*This alert is no longer active.*")
         if self.wmo:
@@ -147,73 +134,65 @@ class Alert(Feature):
         return embed
 
 
+class Point(Feature):
+    forecastZone: str
+
+    @property
+    def forecast_zone(self):
+        return self.forecast_zone
+
+
 class Zone(Feature):
     def __repr__(self):
         return f"Zone({self.id})"
-
-
-class Point(Feature):
-    forecast_zone: Zone
-    gridX: float
-    gridY: float
-
-    def __init__(self, point_feature: dict):
-        super().__init__(point_feature)
-        self.forecast_zone = client.zones.raw(self.forecastZone)
-
-    def __repr__(self):
-        return f"Point({self.gridX},{self.gridY})"
-
 
 class ClientAlerts:
     def __init__(self, parent):
         self.parent = parent
 
-    def __call__(self, alert_id: str = None):
+    async def __call__(self, alert_id: str = None):
         if alert_id:
-            return Alert(self.parent.get(f"alerts/{alert_id}"))
+            return Alert(await self.parent.get(f"alerts/{alert_id}"))
 
-    def active(self, **params):
-        return FeatureCollection(self.parent.get(f"alerts/active", params=params))
-
+    async def active(self, **params):
+        return FeatureCollection(await self.parent.get(f"alerts/active", params=params))
 
 class ClientPoints:
     def __init__(self, parent):
         self.parent = parent
 
-    def __call__(self, lat: float, lon: float, **params):
-        return Point(self.parent.get(f"points/{lat:.4f},{lon:.4f}"))
-
+    async def __call__(self, latitude: float, longitude: float):
+        lat, lon = f"{latitude:.4f}", f"{longitude:.4f}"
+        point = Point(await self.parent.get(f"points/{lat},{lon}"))
+        zone = await client.zones.raw(point.forecastZone)
+        return zone
 
 class ClientZones:
     def __init__(self, parent):
         self.parent = parent
         self._cache = dict()
 
-    def __call__(self, *zone_ids) -> [Zone]:
+    async def __call__(self, *zone_ids) -> [Zone]:
         """ Return list of zone objects. Query API for non-cached zones. """
         param_ids = [i for i in zone_ids if i not in self._cache.keys()]
         if len(param_ids) > 0:
             params = {"id": ",".join(param_ids)}
-            new_zones = FeatureCollection(client.get("zones/forecast", params=params))
+            new_zones = FeatureCollection(await client.get("zones/forecast", params=params))
             for i in new_zones:
                 self._cache[i.id] = i
         return [self._cache[i] for i in zone_ids]
 
-    def raw(self, zone_url: str) -> Zone:
+    async def raw(self, zone_url: str) -> Zone:
         if self._cache.get(zone_url, None) is None:
-            resp = client.get(zone_url, raw=True)
+            resp = await client.get(zone_url, raw=True)
             self._cache[zone_url] = resp
         return Zone(self._cache[zone_url])
 
-
 class Client:
-    """ Basic client for querying weather.gov API."""
-
     def __init__(self):
         self.start_time = dt.datetime.now()
-        self.headers = {"User-Agent": "python-requests | Discord weather bot"}
-        self.session = requests.Session()
+        self.headers = {"User-Agent": "python-aiohttp | Discord weather bot"}
+        self.session = None
         self.alert_zones = set()
         self.get_count = 0
         self.get_last = None
@@ -221,18 +200,26 @@ class Client:
         self.points = ClientPoints(self)
         self.zones = ClientZones(self)
 
-    def get(self, endpoint: str, raw=False, params: dict = None) -> dict:
-        """ GET requests  """
-        if params is None:
-            params = dict()
-        url = f"https://api.weather.gov/{endpoint}"
-        if raw:
-            url = endpoint
-        with self.session.get(url=url, headers=self.headers, params=params, timeout=5) as resp:
-            self.get_count += 1
-            self.get_last = dt.datetime.now()
-            print(f"NWS API: {resp.status_code} {resp.reason} {resp.url}")
-            resp.raise_for_status()  # api error
-            return resp.json()
+    async def initialize_session(self):
+        """Initializes the session."""
+        self.session = aiohttp.ClientSession()
+
+    async def get(self, endpoint, params=None, raw=False):
+        if self.session is None:
+            await self.initialize_session()
+        url = f"{endpoint}" if raw else f"https://api.weather.gov/{endpoint}"
+        try:
+            async with self.session.get(url, params=params, headers=self.headers) as resp:
+                self.get_count += 1
+                self.get_last = dt.datetime.now()
+                print(f"{resp.status} {resp.url}")
+                resp.raise_for_status()
+                return await resp.json()
+        except aiohttp.ClientError as e:
+            print(f"Error during GET request: {endpoint}")
+            return None
+        except Exception as e:
+            print(f"Error: {e}")
+            return None
 
 client = Client()
