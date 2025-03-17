@@ -52,4 +52,4 @@ Alerts for Pensacola, Pensacola Bay and adjacent ocean zones in the Gulf: `/w ad
 ### GPS coordinate
 Alerts for Manhattan, NY: `/w add point 40.6892 -74.0445`
 
-GPS points are not stored or displayed after the zone in which they reside in are determined.
+GPS points are not stored or displayed after the zone in which they reside in is determined.
