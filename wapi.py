@@ -1,27 +1,23 @@
 import aiohttp
+from collections import deque
 import datetime as dt
 import discord
 import re
 
+class RequestRateExceeded(Exception):
+    pass
+
 
 class FeatureCollection(list):
     """ Default object from API """
-    updated: dt.datetime
 
-    def __init__(self, fcoll=dict()):
+    def __init__(self, fcoll=None):
         super().__init__()
         self.title = fcoll.get("title", None)
-        updated = fcoll.get("updated", None)
-        if updated:
-            self.updated = dt.datetime.fromisoformat(updated)
-        if len(fcoll) == 0:
-            return
         for feature in fcoll["features"]:
             match feature["properties"]["@type"]:
                 case "wx:Alert":
                     self.append(Alert(feature))
-                case "wx:Point":
-                    continue #self.append(Point(feature))
                 case "wx:Zone":
                     self.append(Zone(feature))
                 case _:
@@ -29,7 +25,6 @@ class FeatureCollection(list):
 
     def __repr__(self):
         return f"FeatureCollection({self.title})"
-
 
 class Feature:
     id: str = None
@@ -69,6 +64,7 @@ class Alert(Feature):
 
     def __init__(self, alert_feature):
         super().__init__(alert_feature)
+        self.is_active = True
 
         # pull out required parameters
         self.nws_headline = self.parameters.get("NWSheadline", None)
@@ -105,14 +101,10 @@ class Alert(Feature):
             description += f"{"\n".join(self.nws_headline)}\n\n"
             description += self.areaDesc
 
-        embed = discord.Embed(color=color,
-                              title=self.event,
-                              url=f"https://alerts.weather.gov/search?id={self.id}",
-                              description=description,
-                              timestamp=self.sent)
+        embed = discord.Embed(color=color, title=self.event, url=f"https://alerts.weather.gov/search?id={self.id}",
+                              description=description, timestamp=self.sent)
         if self.instruction:
-            instruction = self.instruction[:1024]
-            embed.add_field(name="Instructions", value=instruction, inline=False)
+            embed.add_field(name="Instructions", value=self.instruction[:1024], inline=False)
         embed.add_field(name="Severity", value=f"{self.severity} - {self.urgency}")
         if self.onset is not None:
             embed.add_field(name="Onset", value = f"<t:{int(self.onset.timestamp())}:R>")
@@ -133,14 +125,8 @@ class Alert(Feature):
             embed.set_author(name=self.senderName, url=author_url)
         return embed
 
-
 class Point(Feature):
     forecastZone: str
-
-    @property
-    def forecast_zone(self):
-        return self.forecast_zone
-
 
 class Zone(Feature):
     def __repr__(self):
@@ -164,8 +150,12 @@ class ClientPoints:
     async def __call__(self, latitude: float, longitude: float):
         lat, lon = f"{latitude:.4f}", f"{longitude:.4f}"
         point = Point(await self.parent.get(f"points/{lat},{lon}"))
-        zone = await client.zones.raw(point.forecastZone)
-        return zone
+        zones = []
+        if hasattr(point, "forecastZone"):
+            zones.append(await client.zones.raw(point.forecastZone))
+        if hasattr(point, "county"):
+            zones.append(await client.zones.raw(point.county))
+        return zones
 
 class ClientZones:
     def __init__(self, parent):
@@ -178,14 +168,17 @@ class ClientZones:
         if len(param_ids) > 0:
             params = {"id": ",".join(param_ids)}
             new_zones = FeatureCollection(await client.get("zones/forecast", params=params))
-            for i in new_zones:
-                self._cache[i.id] = i
+            if len(new_zones) == 0:
+                return []
+            for zone in new_zones:
+                self._cache[zone.id] = zone
         return [self._cache[i] for i in zone_ids]
 
     async def raw(self, zone_url: str) -> Zone:
         if self._cache.get(zone_url, None) is None:
             resp = await client.get(zone_url, raw=True)
-            self._cache[zone_url] = resp
+            if resp is not None:
+                self._cache[zone_url] = resp
         return Zone(self._cache[zone_url])
 
 class Client:
@@ -195,7 +188,8 @@ class Client:
         self.session = None
         self.alert_zones = set()
         self.get_count = 0
-        self.get_last = None
+        self.request_latest = None
+        self.requests_recent = deque(maxlen=5)
         self.alerts = ClientAlerts(self)
         self.points = ClientPoints(self)
         self.zones = ClientZones(self)
@@ -205,21 +199,26 @@ class Client:
         self.session = aiohttp.ClientSession()
 
     async def get(self, endpoint, params=None, raw=False):
+
         if self.session is None:
             await self.initialize_session()
+
         url = f"{endpoint}" if raw else f"https://api.weather.gov/{endpoint}"
-        try:
-            async with self.session.get(url, params=params, headers=self.headers) as resp:
-                self.get_count += 1
-                self.get_last = dt.datetime.now()
-                print(f"{resp.status} {resp.url}")
-                resp.raise_for_status()
+
+        # Raise exception if too many requests (avg less than 2 seconds between last 5 requests)
+        self.request_latest = dt.datetime.now()
+        self.requests_recent.append(self.request_latest)
+        request_rates = [(self.request_latest - i).seconds for i in self.requests_recent]
+        if len(request_rates) == 5 and sum(request_rates) / 5 < 2:
+            raise RequestRateExceeded
+
+        async with self.session.get(url, params=params, headers=self.headers) as resp:
+            self.get_count += 1
+            print(f"{resp.status} {resp.url}")
+            resp.raise_for_status()
+            try:
                 return await resp.json()
-        except aiohttp.ClientError as e:
-            print(f"Error during GET request: {endpoint}")
-            return None
-        except Exception as e:
-            print(f"Error: {e}")
-            return None
+            except aiohttp.ClientResponseError as e:
+                raise e
 
 client = Client()

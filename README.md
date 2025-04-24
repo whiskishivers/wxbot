@@ -8,9 +8,9 @@ your discord server.
 
 ## Features
 - Updates your specified alert channel every 5 minutes, or every minute during extreme weather.
-- Posts all active alerts including test messages.
+- Posts all active alerts.
   - Alerts of immediate urgency contain the full description.
-  - Other alerts contain a summary headline and a list of affected zones in your filter.
+  - Other alerts contain a summary headline and a list of affected zones.
   - Severe alerts are colored yellow. Extreme alerts are colored red.
 - Alerts can be filtered using forecast zone IDs or GPS coordinates.
 - Expired or canceled alert messages are automatically handled.
@@ -38,13 +38,14 @@ your discord server.
 
 `/w subscribe` Set alert channel by running this command in it
 
-`/w add point` Add a forecast zone using GPS latitude and longitude.
+`/w add point` Include alerts from forecast and county zones associated with a given GPS coordinate
 
-`/w add zone` Add a forecast zone using a zone identifier. See below.
+`/w add zone` Include alerts from a specified forecast zone. See below
 
 ## Examples
-Visit the [NWS alerts page](https://alerts.weather.gov/) to look up zone IDs. The bot currently supports forecast zones
-only. Multiple identifiers can be added in one command if they are separated by a comma.
+Visit the [NWS alerts page](https://alerts.weather.gov/) to look up zone IDs. `add zone` only supports forecast zones.
+Use the `add point` command to include county zones.
+Multiple identifiers can be added in one command if they are separated by a comma.
 
 ### Zone IDs
 Alerts for Pensacola, Pensacola Bay and adjacent ocean zones in the Gulf: `/w add zone GMZ634,FLZ202,GMZ655,GMZ650`
